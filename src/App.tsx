@@ -190,6 +190,7 @@ function App() {
 
       {(tab === 'all' || tab === 'pending') && (
         <section className="panel">
+          <PrintHeader title={tab === 'pending' ? '待完成清單' : '統計清單'} filters={filters} count={listForActiveTab.length} />
           <ListHeader title={tab === 'pending' ? '待完成清單' : '統計清單'} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} />
           <RequestTable requests={listForActiveTab} isAdmin={isAdmin} onEdit={startEdit} onDelete={handleDelete} />
         </section>
@@ -236,6 +237,28 @@ function Dashboard({ stats, filters, setFilters, loading, onRefresh }: { stats: 
 }
 
 function Kpi({ label, value, tone }: { label: string, value: string | number, tone: string }) { return <div className={`kpi ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
+
+function PrintHeader({ title, filters, count }: { title: string, filters: Filters, count: number }) {
+  const printDate = new Date().toLocaleString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const filterSummary = [
+    filters.from || filters.to ? `日期：${filters.from || '不限'} 至 ${filters.to || '不限'}` : '日期：全部',
+    filters.categoryCode ? `大類：${filters.categoryCode}` : '大類：全部',
+    filters.topicCode ? `第一層主題：${filters.topicCode}` : '第一層主題：全部',
+    filters.status !== 'all' ? `狀態：${statusLabels[filters.status]}` : '狀態：全部',
+    filters.urgency !== 'all' ? `急迫度：${urgencyLabels[filters.urgency]}` : '急迫度：全部',
+  ].join('　｜　')
+
+  return <div className="print-header">
+    <h1>SQMS 程序書修訂需求管理和統計系統</h1>
+    <h2>{title}</h2>
+    <div className="print-meta">
+      <span>打印內容：{title}</span>
+      <span>打印日期：{printDate}</span>
+      <span>打印件數：{count}</span>
+    </div>
+    <p>{filterSummary}</p>
+  </div>
+}
 
 function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean }) {
   const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []

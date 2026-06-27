@@ -85,6 +85,7 @@ tr.overdue td { background: #fff1f2; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .empty { text-align: center; color: var(--muted); padding: 36px; }
 .admin-login { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.print-header { display: none; }
 
 @media (max-width: 760px) {
   .app-shell { padding: 10px; }
@@ -110,8 +111,14 @@ tr.overdue td { background: #fff1f2; }
   body { background: #fff; }
   .no-print, .nav-tabs, .topbar, .message, .actions { display: none !important; }
   .app-shell, .panel { max-width: none; padding: 0; margin: 0; box-shadow: none; border: 0; }
+  .print-header { display: block; margin: 0 0 8mm; padding-bottom: 4mm; border-bottom: 1px solid #999; color: #111; }
+  .print-header h1 { margin: 0 0 2mm; font-size: 16pt; letter-spacing: 0; }
+  .print-header h2 { margin: 0 0 3mm; font-size: 13pt; }
+  .print-header p { margin: 2mm 0 0; font-size: 9pt; line-height: 1.45; }
+  .print-meta { display: flex; flex-wrap: wrap; gap: 5mm; font-size: 9pt; }
   .table-wrap { overflow: visible; border: 0; }
   .request-table { min-width: 0; font-size: 10px; }
+  .col-actions { display: none; }
   th, td { padding: 5px; }
   textarea, input, select { border: 0; padding: 0; }
 }
