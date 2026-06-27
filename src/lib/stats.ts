@@ -1,7 +1,5 @@
 import type { ChangeRequest, DashboardFilters, DashboardStats } from '../types'
 
-const DAY_MS = 24 * 60 * 60 * 1000
-
 function toDateOnly(value?: string): string | undefined {
   if (!value) return undefined
   return value.slice(0, 10)
@@ -28,8 +26,14 @@ export function filterRequests(requests: ChangeRequest[], filters: DashboardFilt
   return requests.filter((request) => {
     if (request.isDeleted) return false
     const created = toDateOnly(request.createdAt)
-    if (from && created && created < from) return false
-    if (to && created && created > to) return false
+    const updated = toDateOnly(request.updatedAt)
+    const inDateRange = [created, updated].some((date) => {
+      if (!date) return false
+      if (from && date < from) return false
+      if (to && date > to) return false
+      return true
+    })
+    if ((from || to) && !inDateRange) return false
     if (filters.categoryCode && request.categoryCode !== filters.categoryCode) return false
     if (filters.topicCode && request.topicCode !== filters.topicCode) return false
     if (filters.status && filters.status !== 'all' && request.status !== filters.status) return false
@@ -42,6 +46,13 @@ export function buildDashboardStats(requests: ChangeRequest[], filters: Dashboar
   const today = filters.today ?? new Date().toISOString().slice(0, 10)
   const scoped = filterRequests(requests, filters)
   const completed = scoped.filter((request) => request.status === 'completed').length
+  const overdue = scoped.filter((request) => isOverdue(request, today)).length
+  const completedRequests = scoped.filter((request) => request.status === 'completed')
+  const onTimeCompleted = completedRequests.filter((request) => {
+    const completionDate = toDateOnly(request.completionDate) ?? toDateOnly(request.updatedAt)
+    if (!completionDate || !request.targetDueDate) return false
+    return completionDate <= request.targetDueDate
+  }).length
   const byCategory: Record<string, number> = {}
   const byTopic: Record<string, number> = {}
   const byStatus: Record<string, number> = {}
@@ -54,31 +65,17 @@ export function buildDashboardStats(requests: ChangeRequest[], filters: Dashboar
     addCount(byUrgency, request.urgency)
   })
 
-  const recent = [...scoped]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 8)
-
-  const dueSoon = scoped
-    .filter(isPending)
-    .sort((a, b) => a.targetDueDate.localeCompare(b.targetDueDate))
-    .filter((request) => {
-      if (!request.targetDueDate) return false
-      const diff = (new Date(request.targetDueDate).getTime() - new Date(today).getTime()) / DAY_MS
-      return diff <= 14
-    })
-    .slice(0, 8)
-
   return {
     total: scoped.length,
     completed,
     completionRate: scoped.length === 0 ? 0 : Math.round((completed / scoped.length) * 100),
-    overdue: scoped.filter((request) => isOverdue(request, today)).length,
+    onTimeCompletionRate: completed === 0 ? 0 : Math.round((onTimeCompleted / completed) * 100),
+    overdue,
+    overdueRate: scoped.length === 0 ? 0 : Math.round((overdue / scoped.length) * 100),
     pending: scoped.filter(isPending).length,
     byCategory,
     byTopic,
     byStatus,
     byUrgency,
-    recent,
-    dueSoon,
   }
 }

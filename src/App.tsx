@@ -223,25 +223,41 @@ function Dashboard({ stats, filters, setFilters, loading, onRefresh }: { stats: 
       <Kpi label="提出件數" value={stats.total} tone="mint" />
       <Kpi label="完成件數" value={stats.completed} tone="blue" />
       <Kpi label="完成率" value={`${stats.completionRate}%`} tone="purple" />
+      <Kpi label="按時完成率" value={`${stats.onTimeCompletionRate}%`} tone="green" />
       <Kpi label="滯期數量" value={stats.overdue} tone="pink" />
+      <Kpi label="逾期率" value={`${stats.overdueRate}%`} tone="orange" />
       <Kpi label="待完成" value={stats.pending} tone="yellow" />
     </div>
     {loading ? <p>讀取中...</p> : <div className="chart-grid">
       <div className="chart-card"><h3>各大類分佈</h3><ResponsiveContainer width="100%" height={230}><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={82} label>{categoryData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
       <div className="chart-card"><h3>第一層主題 Top 8</h3><ResponsiveContainer width="100%" height={230}><BarChart data={topicData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#a2d2ff" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></div>
     </div>}
-    <div className="mini-lists"><MiniList title="最近新增" data={stats.recent} /><MiniList title="即將到期 / 已滯期" data={stats.dueSoon} /></div>
   </section>
 }
 
 function Kpi({ label, value, tone }: { label: string, value: string | number, tone: string }) { return <div className={`kpi ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
-function MiniList({ title, data }: { title: string, data: ChangeRequest[] }) { return <div className="mini-card"><h3>{title}</h3>{data.length === 0 ? <p className="subtle">暫無資料</p> : data.map((r) => <div key={r.id} className="mini-row"><b>{r.requestNo}</b><span>{getTopicLabel(r.topicCode)}</span><em>{r.targetDueDate}</em></div>)}</div> }
 
 function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean }) {
   const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []
+  const applyRecentDays = (days: number) => {
+    const today = new Date()
+    const from = new Date(today)
+    from.setDate(today.getDate() - days + 1)
+    const formatDate = (date: Date) => date.toISOString().slice(0, 10)
+    setFilters({ ...filters, from: formatDate(from), to: formatDate(today) })
+  }
   return <div className="list-header no-print">
-    <div className="section-title"><div><p className="eyebrow">List</p><h2>{title}</h2></div><button className="ghost" onClick={onRefresh}><RefreshCw size={14} />同步最新</button></div>
+    <div className="section-title list-title-row">
+      <div><p className="eyebrow">List</p><h2>{title}</h2></div>
+      <div className="header-actions">
+        <button className="ghost" onClick={onRefresh}><RefreshCw size={14} />同步最新</button>
+        {!hideExports && <><button className="ghost" onClick={() => window.print()}><Printer size={14} />列印/PDF</button><button className="ghost" onClick={() => exportCsv(requests, 'sqms修訂需求.csv')}><Download size={14} />CSV</button><button className="ghost" onClick={() => exportExcel(requests, 'sqms修訂需求.xlsx')}><FileSpreadsheet size={14} />Excel</button></>}
+      </div>
+    </div>
     <div className="filters">
+      <button className="ghost quick-range" onClick={() => applyRecentDays(30)}>近30天新增、修改</button>
+      <button className="ghost quick-range" onClick={() => applyRecentDays(60)}>近60天新增、修改</button>
+      <button className="ghost quick-range" onClick={() => applyRecentDays(90)}>近90天新增、修改</button>
       <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
       <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
       <select value={filters.categoryCode} onChange={(e) => setFilters({ ...filters, categoryCode: e.target.value, topicCode: '' })}><option value="">全部大類</option>{catalog.map((c) => <option key={c.code} value={c.code}>{c.code}｜{c.nameZh}</option>)}</select>
@@ -249,7 +265,6 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.urgency} onChange={(e) => setFilters({ ...filters, urgency: e.target.value as Urgency | 'all' })}><option value="all">全部急迫度</option>{Object.entries(urgencyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <button className="ghost" onClick={() => setFilters(emptyFilters)}>清除</button>
-      {!hideExports && <><button className="ghost" onClick={() => window.print()}><Printer size={14} />列印/PDF</button><button className="ghost" onClick={() => exportCsv(requests, 'sqms修訂需求.csv')}><Download size={14} />CSV</button><button className="ghost" onClick={() => exportExcel(requests, 'sqms修訂需求.xlsx')}><FileSpreadsheet size={14} />Excel</button></>}
     </div>
   </div>
 }
@@ -260,7 +275,7 @@ function RequestTable({ requests, isAdmin, onEdit, onDelete }: { requests: Chang
     if (overdueDiff) return overdueDiff
     return a.targetDueDate.localeCompare(b.targetDueDate)
   })
-  return <div className="table-wrap"><table className="request-table"><thead><tr><th>編號</th><th>歸屬</th><th>申請人</th><th>建議內容</th><th>期望日</th><th>急迫度</th><th>狀態</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={8} className="empty">暫無資料</td></tr> : sorted.map((request) => <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td>{request.applicantName}</td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{urgencyLabels[request.urgency]}</td><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span></td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>)}</tbody></table></div>
+  return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr><th>狀態</th><th>急迫度</th><th>編號</th><th>歸屬</th><th>建議內容</th><th>期望日</th><th>申請人</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={8} className="empty">暫無資料</td></tr> : sorted.map((request) => <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span></td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>)}</tbody></table></div>
 }
 
 export default App

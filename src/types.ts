@@ -64,12 +64,12 @@ export interface DashboardStats {
   total: number
   completed: number
   completionRate: number
+  onTimeCompletionRate: number
   overdue: number
+  overdueRate: number
   pending: number
   byCategory: Record<string, number>
   byTopic: Record<string, number>
   byStatus: Record<string, number>
   byUrgency: Record<string, number>
-  recent: ChangeRequest[]
-  dueSoon: ChangeRequest[]
 }

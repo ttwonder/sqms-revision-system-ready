@@ -50,22 +50,30 @@ input:focus, select:focus, textarea:focus { border-color: #cdb4db; box-shadow: 0
 .ghost, .actions button { background: #f7f1f9; color: #675070; }
 .danger { background: #ffe4e6 !important; color: #9f1239 !important; }
 
+.list-title-row { align-items: flex-start; }
+.header-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filters input, .filters select { width: auto; min-width: 130px; padding: 8px 10px; }
-.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
-.kpi { border-radius: 20px; padding: 14px; min-height: 76px; display: flex; flex-direction: column; justify-content: space-between; }
+.quick-range { white-space: nowrap; }
+.dashboard-panel .filters { margin-bottom: 24px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 9px; margin-top: 10px; margin-bottom: 16px; }
+.kpi { border-radius: 18px; padding: 12px 10px; min-height: 64px; display: flex; flex-direction: column; justify-content: space-between; }
 .kpi span { color: #665c71; font-size: .86rem; font-weight: 800; }
-.kpi strong { font-size: 2rem; line-height: 1; }
-.kpi.mint { background: var(--mint); } .kpi.blue { background: var(--blue); } .kpi.purple { background: var(--purple); } .kpi.pink { background: var(--pink); } .kpi.yellow { background: var(--yellow); }
+.kpi strong { font-size: 1.58rem; line-height: 1; }
+.kpi.mint { background: var(--mint); } .kpi.blue { background: var(--blue); } .kpi.purple { background: var(--purple); } .kpi.pink { background: var(--pink); } .kpi.yellow { background: var(--yellow); } .kpi.green { background: #d0f4de; } .kpi.orange { background: #ffd6a5; }
 .chart-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
-.chart-card, .mini-card { border: 1px solid var(--line); border-radius: 20px; padding: 14px; background: #fff; }
-.mini-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.mini-row { display: grid; grid-template-columns: 110px 1fr 92px; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: .86rem; }
-.mini-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mini-row em { font-style: normal; color: var(--muted); }
+.chart-card { border: 1px solid var(--line); border-radius: 20px; padding: 14px; background: #fff; }
 
 .table-wrap { overflow-x: auto; border-radius: 18px; border: 1px solid var(--line); }
-.request-table { width: 100%; border-collapse: collapse; min-width: 1050px; background: #fff; }
+.request-table { width: 100%; border-collapse: collapse; min-width: 1160px; background: #fff; table-layout: fixed; }
+.col-status { width: 86px; }
+.col-urgency { width: 70px; }
+.col-no { width: 136px; }
+.col-scope { width: 220px; }
+.col-content { width: auto; }
+.col-due { width: 108px; }
+.col-applicant { width: 100px; }
+.col-actions { width: 108px; }
 th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: .88rem; }
 th { background: #fbf5fc; color: #6e5476; position: sticky; top: 0; z-index: 1; }
 td b, td small { display: block; }
@@ -89,12 +97,12 @@ tr.overdue td { background: #fff1f2; }
   .wide, .check { grid-column: span 1; }
   .form-actions { position: sticky; bottom: 8px; background: rgba(255,255,255,.9); border: 1px solid var(--line); padding: 8px; border-radius: 14px; backdrop-filter: blur(10px); }
   .form-actions .primary { flex: 1; justify-content: center; }
+  .list-title-row { align-items: stretch; }
+  .header-actions { justify-content: flex-start; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .chart-grid, .mini-lists, .admin-login { grid-template-columns: 1fr; }
+  .chart-grid, .admin-login { grid-template-columns: 1fr; }
   .filters { display: grid; grid-template-columns: 1fr 1fr; }
   .filters input, .filters select, .filters button { width: 100%; min-width: 0; }
-  .mini-row { grid-template-columns: 88px 1fr; }
-  .mini-row em { grid-column: 2; }
 }
 
 @media print {
