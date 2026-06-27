@@ -262,12 +262,17 @@ function PrintHeader({ title, filters, count }: { title: string, filters: Filter
 
 function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean }) {
   const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []
+  const [rangePreset, setRangePreset] = useState('')
   const applyRecentDays = (days: number) => {
     const today = new Date()
     const from = new Date(today)
     from.setDate(today.getDate() - days + 1)
     const formatDate = (date: Date) => date.toISOString().slice(0, 10)
     setFilters({ ...filters, from: formatDate(from), to: formatDate(today) })
+  }
+  const handleRangeChange = (value: string) => {
+    setRangePreset(value)
+    if (value) applyRecentDays(Number(value))
   }
   return <div className="list-header no-print">
     <div className="section-title list-title-row">
@@ -278,16 +283,19 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       </div>
     </div>
     <div className="filters">
-      <button className="ghost quick-range" onClick={() => applyRecentDays(30)}>近30天新增、修改</button>
-      <button className="ghost quick-range" onClick={() => applyRecentDays(60)}>近60天新增、修改</button>
-      <button className="ghost quick-range" onClick={() => applyRecentDays(90)}>近90天新增、修改</button>
+      <select className="range-select" aria-label="新增或修改時間範圍" value={rangePreset} onChange={(e) => handleRangeChange(e.target.value)}>
+        <option value="">新增/修改時間</option>
+        <option value="30">近30天新增、修改</option>
+        <option value="60">近60天新增、修改</option>
+        <option value="90">近90天新增、修改</option>
+      </select>
       <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
       <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
       <select value={filters.categoryCode} onChange={(e) => setFilters({ ...filters, categoryCode: e.target.value, topicCode: '' })}><option value="">全部大類</option>{catalog.map((c) => <option key={c.code} value={c.code}>{c.code}｜{c.nameZh}</option>)}</select>
       <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{t.code}｜{t.titleZh}</option>)}</select>
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.urgency} onChange={(e) => setFilters({ ...filters, urgency: e.target.value as Urgency | 'all' })}><option value="all">全部急迫度</option>{Object.entries(urgencyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-      <button className="ghost" onClick={() => setFilters(emptyFilters)}>清除</button>
+      <button className="ghost" onClick={() => { setRangePreset(''); setFilters(emptyFilters) }}>清除</button>
     </div>
   </div>
 }
