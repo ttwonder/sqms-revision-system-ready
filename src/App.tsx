@@ -11,7 +11,7 @@ import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest } from
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
 import { fromDbAdminUser, isCloudConfigured, signupClient, supabase } from './lib/supabaseClient'
 
-type Tab = 'form' | 'dashboard' | 'all' | 'pending' | 'admin'
+type Tab = 'form' | 'dashboard' | 'all' | 'pending' | 'completed' | 'admin'
 
 type Filters = {
   from: string
@@ -24,6 +24,33 @@ type Filters = {
 
 const emptyFilters: Filters = { from: '', to: '', categoryCode: '', topicCode: '', status: 'all', urgency: 'all' }
 const chartColors = ['#b8e0d2', '#f7c6c7', '#cdb4db', '#a2d2ff', '#ffd6a5', '#fdffb6', '#d0f4de']
+const duplicateSearchHint = '提出新需求前，請搜索是否類似需求已被提出。'
+
+function requestMatchesSearch(request: ChangeRequest, query: string) {
+  const keyword = query.trim().toLowerCase()
+  if (!keyword) return true
+  const text = [
+    request.requestNo,
+    request.applicantName,
+    request.categoryCode,
+    getCategoryName(request.categoryCode),
+    request.topicCode,
+    getTopicLabel(request.topicCode),
+    request.manualItemCode,
+    getItemLabel(request.topicCode, request.manualItemCode),
+    request.scopeNote,
+    request.suggestedChange,
+    request.changeReason,
+    request.referenceMaterials,
+    request.publicEditNote,
+    request.targetDueDate,
+    request.createdAt,
+    request.updatedAt,
+    statusLabels[request.status],
+    urgencyLabels[request.urgency],
+  ].filter(Boolean).join(' ').toLowerCase()
+  return text.includes(keyword)
+}
 
 function App() {
   const [tab, setTab] = useState<Tab>('form')
@@ -31,6 +58,7 @@ function App() {
   const [form, setForm] = useState<ChangeRequest>(() => createBlankRequest(1))
   const [editingId, setEditingId] = useState<string | null>(null)
   const [filters, setFilters] = useState<Filters>(emptyFilters)
+  const [searchQuery, setSearchQuery] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [adminProfile, setAdminProfile] = useState<AdminUser | null>(null)
@@ -120,7 +148,9 @@ function App() {
   const isOwner = adminProfile?.role === 'owner'
 
   const filtered = useMemo(() => filterRequests(requests, filters), [requests, filters])
-  const pending = useMemo(() => filtered.filter(isPending), [filtered])
+  const searched = useMemo(() => filtered.filter((request) => requestMatchesSearch(request, searchQuery)), [filtered, searchQuery])
+  const pending = useMemo(() => searched.filter(isPending), [searched])
+  const completed = useMemo(() => searched.filter((request) => request.status === 'completed'), [searched])
   const stats = useMemo(() => buildDashboardStats(requests, filters), [requests, filters])
   const topicOptions = getTopicOptions(form.categoryCode)
   const itemOptions = getManualItemOptions(form.topicCode)
@@ -265,7 +295,8 @@ function App() {
     }
   }
 
-  const listForActiveTab = tab === 'pending' ? pending : filtered
+  const activeListTitle = tab === 'pending' ? '待完成清單' : tab === 'completed' ? '已完成清單' : '統計清單'
+  const listForActiveTab = tab === 'pending' ? pending : tab === 'completed' ? completed : searched
 
   return (
     <div className="app-shell">
@@ -283,6 +314,7 @@ function App() {
         <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}><LayoutDashboard size={16} /> Dashboard</button>
         <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>統計清單</button>
         <button className={tab === 'pending' ? 'active' : ''} onClick={() => setTab('pending')}>待完成</button>
+        <button className={tab === 'completed' ? 'active' : ''} onClick={() => setTab('completed')}>已完成</button>
         <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}><Lock size={16} /> 管理</button>
       </nav>
 
@@ -297,6 +329,7 @@ function App() {
             </div>
             <button className="ghost no-print" onClick={resetForm}>新增一筆</button>
           </div>
+          <p className="duplicate-search-hint no-print">{duplicateSearchHint}</p>
           <form onSubmit={handleSubmit} className="request-form">
             <label>需求編號<input value={form.requestNo} onChange={(e) => updateForm('requestNo', e.target.value)} /></label>
             <label>申請人 *<input value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
@@ -322,10 +355,10 @@ function App() {
 
       {tab === 'dashboard' && <Dashboard stats={stats} filters={filters} setFilters={setFilters} loading={loading} onRefresh={refresh} />}
 
-      {(tab === 'all' || tab === 'pending') && (
+      {(tab === 'all' || tab === 'pending' || tab === 'completed') && (
         <section className="panel">
-          <PrintHeader title={tab === 'pending' ? '待完成清單' : '統計清單'} filters={filters} count={listForActiveTab.length} />
-          <ListHeader title={tab === 'pending' ? '待完成清單' : '統計清單'} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} />
+          <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
+          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
           <RequestTable requests={listForActiveTab} isAdmin={isAdmin} onEdit={startEdit} onDelete={handleDelete} />
         </section>
       )}
@@ -451,7 +484,7 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filte
   </section>
 }
 
-function PrintHeader({ title, filters, count }: { title: string, filters: Filters, count: number }) {
+function PrintHeader({ title, filters, count, searchQuery = '' }: { title: string, filters: Filters, count: number, searchQuery?: string }) {
   const printDate = new Date().toLocaleString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   const filterSummary = [
     filters.from || filters.to ? `日期：${filters.from || '不限'} 至 ${filters.to || '不限'}` : '日期：全部',
@@ -459,6 +492,7 @@ function PrintHeader({ title, filters, count }: { title: string, filters: Filter
     filters.topicCode ? `第一層主題：${filters.topicCode}` : '第一層主題：全部',
     filters.status !== 'all' ? `狀態：${statusLabels[filters.status]}` : '狀態：全部',
     filters.urgency !== 'all' ? `急迫度：${urgencyLabels[filters.urgency]}` : '急迫度：全部',
+    searchQuery.trim() ? `關鍵詞：${searchQuery.trim()}` : '關鍵詞：全部',
   ].join('　｜　')
 
   return <div className="print-header">
@@ -473,7 +507,7 @@ function PrintHeader({ title, filters, count }: { title: string, filters: Filter
   </div>
 }
 
-function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean }) {
+function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void }) {
   const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []
   const [rangePreset, setRangePreset] = useState('')
   const applyRecentDays = (days: number) => {
@@ -487,6 +521,11 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
     setRangePreset(value)
     if (value) applyRecentDays(Number(value))
   }
+  const clearFilters = () => {
+    setRangePreset('')
+    setFilters(emptyFilters)
+    setSearchQuery?.('')
+  }
   return <div className="list-header no-print">
     <div className="section-title list-title-row">
       <div><p className="eyebrow">List</p><h2>{title}</h2></div>
@@ -495,7 +534,9 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
         {!hideExports && <><button className="ghost" onClick={() => window.print()}><Printer size={14} />列印/PDF</button><button className="ghost" onClick={() => exportCsv(requests, 'sqms修訂需求.csv')}><Download size={14} />CSV</button><button className="ghost" onClick={() => exportExcel(requests, 'sqms修訂需求.xlsx')}><FileSpreadsheet size={14} />Excel</button></>}
       </div>
     </div>
+    {setSearchQuery && <p className="duplicate-search-hint">{duplicateSearchHint}</p>}
     <div className="filters">
+      {setSearchQuery && <input className="search-input" type="search" value={searchQuery ?? ''} onChange={(e) => setSearchQuery(e.target.value)} placeholder="搜索已提出需求關鍵詞" aria-label="搜索已提出需求關鍵詞" />}
       <select className="range-select" aria-label="新增或修改時間範圍" value={rangePreset} onChange={(e) => handleRangeChange(e.target.value)}>
         <option value="">新增/修改時間</option>
         <option value="30">近30天新增、修改</option>
@@ -508,7 +549,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{t.code}｜{t.titleZh}</option>)}</select>
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.urgency} onChange={(e) => setFilters({ ...filters, urgency: e.target.value as Urgency | 'all' })}><option value="all">全部急迫度</option>{Object.entries(urgencyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-      <button className="ghost" onClick={() => { setRangePreset(''); setFilters(emptyFilters) }}>清除</button>
+      <button className="ghost" onClick={clearFilters}>清除</button>
     </div>
   </div>
 }

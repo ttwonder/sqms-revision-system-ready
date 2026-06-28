@@ -52,8 +52,10 @@ input:focus, select:focus, textarea:focus { border-color: #cdb4db; box-shadow: 0
 
 .list-title-row { align-items: flex-start; }
 .header-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+.duplicate-search-hint { margin: -4px 0 10px; color: #8a5f25; background: #fff8d8; border: 1px solid #f4df91; border-radius: 12px; padding: 8px 10px; font-size: .86rem; font-weight: 800; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filters input, .filters select { width: auto; min-width: 130px; padding: 8px 10px; }
+.filters .search-input { min-width: 260px; flex: 1 1 280px; }
 .filters .range-select { min-width: 170px; background: #f7f1f9; color: #675070; border-color: #eaddeb; font-weight: 900; }
 .dashboard-panel .filters { margin-bottom: 24px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 9px; margin-top: 10px; margin-bottom: 16px; }
