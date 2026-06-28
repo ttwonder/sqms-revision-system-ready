@@ -1,8 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
 import type { ChangeRequest } from '../types'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+function cleanEnvValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  // 防止 GitHub Secret 誤貼成多行，例如把 VITE_BASE_PATH=/ 也貼進 anon key。
+  return trimmed.split(/\s+/)[0]
+}
+
+const supabaseUrl = cleanEnvValue(import.meta.env.VITE_SUPABASE_URL)
+const supabaseAnonKey = cleanEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY)
 
 export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null
 export const isCloudConfigured = Boolean(supabase)
