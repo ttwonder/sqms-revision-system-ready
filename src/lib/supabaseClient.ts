@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import type { ChangeRequest } from '../types'
+import type { AdminUser, ChangeRequest } from '../types'
 
 function cleanEnvValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
@@ -13,7 +13,24 @@ const supabaseUrl = cleanEnvValue(import.meta.env.VITE_SUPABASE_URL)
 const supabaseAnonKey = cleanEnvValue(import.meta.env.VITE_SUPABASE_ANON_KEY)
 
 export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null
+export const signupClient = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+  })
+  : null
 export const isCloudConfigured = Boolean(supabase)
+
+export function fromDbAdminUser(row: any): AdminUser {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name || '',
+    role: row.role,
+    active: Boolean(row.active),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
 
 export function toDbRequest(request: ChangeRequest) {
   return {

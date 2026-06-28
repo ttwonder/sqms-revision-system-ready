@@ -25,6 +25,17 @@ export interface CatalogCategory {
 
 export type Urgency = 'urgent' | 'high' | 'medium' | 'low'
 export type RequestStatus = 'new' | 'processing' | 'completed' | 'cancelled'
+export type AdminRole = 'owner' | 'admin'
+
+export interface AdminUser {
+  id: string
+  email: string
+  displayName?: string
+  role: AdminRole
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
 
 export interface ChangeRequest {
   id: string

@@ -85,6 +85,18 @@ tr.overdue td { background: #fff1f2; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .empty { text-align: center; color: var(--muted); padding: 36px; }
 .admin-login { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.permission-card, .admin-card { border: 1px solid var(--line); border-radius: 18px; background: #fff; padding: 14px; }
+.admin-stack { display: grid; gap: 14px; }
+.admin-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 16px; background: #f7fbff; border: 1px solid #dbeafe; }
+.role-pill { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 4px 9px; font-weight: 900; font-size: .76rem; white-space: nowrap; }
+.role-pill.owner { background: #f4eeff; color: #7d5aa0; }
+.role-pill.admin { background: #e8f7f1; color: #277056; }
+.compact-title { margin-bottom: 10px; }
+.admin-user-form { display: grid; grid-template-columns: minmax(190px, 1.2fr) minmax(160px, 1fr) minmax(150px, 1fr) 120px auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.admin-users-list { display: grid; gap: 8px; }
+.admin-user-row { display: grid; grid-template-columns: minmax(240px, 1fr) 90px 72px auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: #fffafd; }
+.admin-user-row.inactive { opacity: .62; background: #f8fafc; }
+.admin-user-row small { display: block; color: var(--muted); margin-top: 3px; }
 .print-header { display: none; }
 
 @media (max-width: 760px) {
@@ -101,7 +113,7 @@ tr.overdue td { background: #fff1f2; }
   .list-title-row { align-items: stretch; }
   .header-actions { justify-content: flex-start; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .chart-grid, .admin-login { grid-template-columns: 1fr; }
+  .chart-grid, .admin-login, .admin-user-form, .admin-user-row { grid-template-columns: 1fr; }
   .filters { display: grid; grid-template-columns: 1fr 1fr; }
   .filters input, .filters select, .filters button { width: 100%; min-width: 0; }
 }

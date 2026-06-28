@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Trash2 } from 'lucide-react'
+import { Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
-import type { ChangeRequest, RequestStatus, Urgency } from './types'
+import type { AdminRole, AdminUser, ChangeRequest, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
 import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest } from './lib/storage'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
-import { isCloudConfigured, supabase } from './lib/supabaseClient'
+import { fromDbAdminUser, isCloudConfigured, signupClient, supabase } from './lib/supabaseClient'
 
 type Tab = 'form' | 'dashboard' | 'all' | 'pending' | 'admin'
 
@@ -33,9 +33,11 @@ function App() {
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminProfile, setAdminProfile] = useState<AdminUser | null>(null)
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
+  const [newAdmin, setNewAdmin] = useState({ email: '', password: '', displayName: '', role: 'admin' as AdminRole })
 
   async function refresh() {
     setLoading(true)
@@ -49,12 +51,73 @@ function App() {
     }
   }
 
+  async function loadAdminProfile(email: string): Promise<AdminUser | null> {
+    if (!supabase) return null
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('*')
+      .eq('email', email.trim().toLowerCase())
+      .eq('active', true)
+      .maybeSingle()
+    if (error) {
+      if (error.message.includes('admin_users') || error.code === '42P01') {
+        throw new Error('管理員權限表尚未建立，請先在 Supabase SQL Editor 執行最新版 supabase/schema.sql。')
+      }
+      throw error
+    }
+    return data ? fromDbAdminUser(data) : null
+  }
+
+  async function refreshAdminUsers() {
+    if (!supabase || !adminProfile) return
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('*')
+      .order('role', { ascending: false })
+      .order('email')
+    if (error) {
+      setMessage(`管理員名單讀取失敗：${error.message}`)
+      return
+    }
+    setAdminUsers((data ?? []).map(fromDbAdminUser))
+  }
+
+  async function acceptAdminSession(email: string) {
+    const profile = await loadAdminProfile(email)
+    if (!profile) {
+      await supabase?.auth.signOut()
+      setAdminProfile(null)
+      setAdminUsers([])
+      throw new Error('無權限：此帳號不在管理員名單中，請聯絡系統 owner。')
+    }
+    setAdminProfile(profile)
+    setAdminEmail(profile.email)
+    const { data } = await supabase
+      ?.from('admin_users')
+      .select('*')
+      .order('role', { ascending: false })
+      .order('email') ?? { data: [] }
+    setAdminUsers((data ?? []).map(fromDbAdminUser))
+    return profile
+  }
+
   useEffect(() => {
     refresh()
     if (supabase) {
-      supabase.auth.getSession().then(({ data }) => setIsAdmin(Boolean(data.session)))
+      supabase.auth.getSession().then(async ({ data }) => {
+        const email = data.session?.user.email
+        if (!email) return
+        try {
+          await acceptAdminSession(email)
+        } catch {
+          // 非管理員歷史登入狀態直接清理，不打擾普通填寫流程。
+        }
+      })
     }
   }, [])
+
+  const isAdmin = Boolean(adminProfile?.active)
+  const isOwner = adminProfile?.role === 'owner'
 
   const filtered = useMemo(() => filterRequests(requests, filters), [requests, filters])
   const pending = useMemo(() => filtered.filter(isPending), [filtered])
@@ -106,25 +169,96 @@ function App() {
   async function handleDelete(request: ChangeRequest) {
     if (!isAdmin) return
     if (!confirm(`確定要刪除 ${request.requestNo}？此操作採軟刪除，前台不再顯示。`)) return
-    await softDeleteRequest(request.id, adminEmail || 'admin')
+    await softDeleteRequest(request.id, adminProfile?.email || 'admin')
     setRequests((current) => current.filter((item) => item.id !== request.id))
     setMessage(`已軟刪除 ${request.requestNo}`)
+  }
+
+  async function handleAdminLogout() {
+    await supabase?.auth.signOut()
+    setAdminProfile(null)
+    setAdminUsers([])
+    setAdminPassword('')
+    setMessage('已登出管理員。')
+  }
+
+  async function createAdminUser(event: React.FormEvent) {
+    event.preventDefault()
+    if (!supabase || !signupClient || !isOwner) {
+      setMessage('無權限：只有 owner 可以新增或維護管理員名單。')
+      return
+    }
+    const email = newAdmin.email.trim().toLowerCase()
+    if (!email) {
+      setMessage('請填寫管理員 Email。')
+      return
+    }
+    if (newAdmin.password && newAdmin.password.length < 6) {
+      setMessage('初始密碼至少需要 6 位。')
+      return
+    }
+
+    if (newAdmin.password) {
+      const { error: signupError } = await signupClient.auth.signUp({
+        email,
+        password: newAdmin.password,
+        options: { data: { display_name: newAdmin.displayName.trim() } },
+      })
+      if (signupError && !/already|registered|exist/i.test(signupError.message)) {
+        setMessage(`建立登入帳號失敗：${signupError.message}。如已關閉公開註冊，請先到 Supabase Auth 手動 Add user，再回此處加入名單。`)
+        return
+      }
+    }
+
+    const { error } = await supabase.from('admin_users').upsert({
+      email,
+      display_name: newAdmin.displayName.trim() || null,
+      role: newAdmin.role,
+      active: true,
+    }, { onConflict: 'email' })
+    if (error) {
+      setMessage(`管理員名單保存失敗：${error.message}`)
+      return
+    }
+    setNewAdmin({ email: '', password: '', displayName: '', role: 'admin' })
+    setMessage(`已加入管理員：${email}`)
+    await refreshAdminUsers()
+  }
+
+  async function deactivateAdmin(user: AdminUser) {
+    if (!supabase || !isOwner) return
+    if (user.email === adminProfile?.email) {
+      setMessage('不能停用目前登入中的 owner 帳號。')
+      return
+    }
+    if (!confirm(`確定停用 ${user.email} 的管理權限？登入帳號仍存在，但不能進入管理界面。`)) return
+    const { error } = await supabase.from('admin_users').update({ active: false }).eq('id', user.id)
+    if (error) {
+      setMessage(`停用失敗：${error.message}`)
+      return
+    }
+    setMessage(`已停用管理員：${user.email}`)
+    await refreshAdminUsers()
   }
 
   async function adminLogin(event: React.FormEvent) {
     event.preventDefault()
     if (supabase) {
-      const { error } = await supabase.auth.signInWithPassword({ email: adminEmail, password: adminPassword })
+      const { data, error } = await supabase.auth.signInWithPassword({ email: adminEmail.trim(), password: adminPassword })
       if (error) {
         setMessage(`登入失敗：${error.message}`)
         return
       }
-      setIsAdmin(true)
-      setMessage('管理員已登入。')
+      try {
+        const profile = await acceptAdminSession(data.user.email ?? adminEmail)
+        setMessage(`管理員已登入：${profile.email}（${profile.role}）`)
+      } catch (permissionError) {
+        setMessage(permissionError instanceof Error ? permissionError.message : '無權限：此帳號不是管理員。')
+      }
       return
     }
     if (adminPassword === 'SQMS-ADMIN') {
-      setIsAdmin(true)
+      setAdminProfile({ id: 'local-owner', email: adminEmail || 'local-owner', role: 'owner', active: true, createdAt: '', updatedAt: '' })
       setMessage('本機展示模式管理員已登入。正式上線請使用 Supabase Auth。')
     } else {
       setMessage('本機展示密碼錯誤。正式上線後使用 Supabase 管理員帳號。')
@@ -197,19 +331,26 @@ function App() {
       )}
 
       {tab === 'admin' && (
-        <section className="panel admin-panel">
-          <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div></div>
-          {!isAdmin ? (
-            <form className="admin-login" onSubmit={adminLogin}>
-              <label>管理員帳號 / Email<input value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="admin@example.com" /></label>
-              <label>密碼<input type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="本機展示密碼：SQMS-ADMIN" /></label>
-              <button className="primary">登入管理</button>
-              <p className="subtle">正式上線後使用 Supabase Auth 建立約 5 位管理員；本機未配置雲端時可用展示密碼測試刪除 UI。</p>
-            </form>
-          ) : (
-            <><p className="subtle">已登入。刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p><RequestTable requests={filtered} isAdmin={isAdmin} onEdit={startEdit} onDelete={handleDelete} /></>
-          )}
-        </section>
+        <AdminPanel
+          adminEmail={adminEmail}
+          adminPassword={adminPassword}
+          adminProfile={adminProfile}
+          adminUsers={adminUsers}
+          filteredRequests={filtered}
+          isAdmin={isAdmin}
+          isOwner={isOwner}
+          newAdmin={newAdmin}
+          setAdminEmail={setAdminEmail}
+          setAdminPassword={setAdminPassword}
+          setNewAdmin={setNewAdmin}
+          onAdminLogin={adminLogin}
+          onAdminLogout={handleAdminLogout}
+          onCreateAdmin={createAdminUser}
+          onDeactivateAdmin={deactivateAdmin}
+          onEditRequest={startEdit}
+          onDeleteRequest={handleDelete}
+          onRefreshAdmins={refreshAdminUsers}
+        />
       )}
     </div>
   )
@@ -237,6 +378,78 @@ function Dashboard({ stats, filters, setFilters, loading, onRefresh }: { stats: 
 }
 
 function Kpi({ label, value, tone }: { label: string, value: string | number, tone: string }) { return <div className={`kpi ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
+
+type AdminPanelProps = {
+  adminEmail: string
+  adminPassword: string
+  adminProfile: AdminUser | null
+  adminUsers: AdminUser[]
+  filteredRequests: ChangeRequest[]
+  isAdmin: boolean
+  isOwner: boolean
+  newAdmin: { email: string, password: string, displayName: string, role: AdminRole }
+  setAdminEmail: (value: string) => void
+  setAdminPassword: (value: string) => void
+  setNewAdmin: (value: { email: string, password: string, displayName: string, role: AdminRole }) => void
+  onAdminLogin: (event: React.FormEvent) => void
+  onAdminLogout: () => void
+  onCreateAdmin: (event: React.FormEvent) => void
+  onDeactivateAdmin: (user: AdminUser) => void
+  onEditRequest: (request: ChangeRequest) => void
+  onDeleteRequest: (request: ChangeRequest) => void
+  onRefreshAdmins: () => void
+}
+
+function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, isAdmin, isOwner, newAdmin, setAdminEmail, setAdminPassword, setNewAdmin, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onRefreshAdmins }: AdminPanelProps) {
+  return <section className="panel admin-panel">
+    <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{isAdmin && <button className="ghost no-print" onClick={onAdminLogout}>登出</button>}</div>
+    {!isAdmin ? (
+      <div className="permission-card">
+        <p className="subtle">只有管理員名單中的帳號可以進入管理界面；其他 Auth 用戶登入後會收到「無權限」提示。</p>
+        <form className="admin-login" onSubmit={onAdminLogin}>
+          <label>管理員帳號 / Email<input value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="admin@example.com" /></label>
+          <label>密碼<input type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="輸入管理員密碼" /></label>
+          <button className="primary">登入管理</button>
+        </form>
+      </div>
+    ) : (
+      <div className="admin-stack">
+        <div className="admin-status">
+          <strong>已登入：{adminProfile?.email}</strong>
+          <span className={`role-pill ${adminProfile?.role}`}>{adminProfile?.role === 'owner' ? 'Owner' : 'Admin'}</span>
+          <span className="subtle">管理員可刪除需求；只有 Owner 可以新增/停用管理員。</span>
+        </div>
+
+        <section className="admin-card">
+          <div className="section-title compact-title"><div><p className="eyebrow">Admins</p><h3>管理員名單</h3></div><button className="ghost" onClick={onRefreshAdmins}><RefreshCw size={14} />同步名單</button></div>
+          {isOwner ? (
+            <form className="admin-user-form" onSubmit={onCreateAdmin}>
+              <label>Email / 用戶名<input value={newAdmin.email} onChange={(e) => setNewAdmin({ ...newAdmin, email: e.target.value })} placeholder="new-admin@example.com" /></label>
+              <label>初始密碼<input type="password" value={newAdmin.password} onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })} placeholder="新帳號填寫；既有 Auth 用戶可留空" /></label>
+              <label>顯示名稱<input value={newAdmin.displayName} onChange={(e) => setNewAdmin({ ...newAdmin, displayName: e.target.value })} placeholder="可選" /></label>
+              <label>角色<select value={newAdmin.role} onChange={(e) => setNewAdmin({ ...newAdmin, role: e.target.value as AdminRole })}><option value="admin">Admin</option><option value="owner">Owner</option></select></label>
+              <button className="primary"><UserPlus size={14} />新增/更新</button>
+            </form>
+          ) : <p className="subtle">你是 Admin，可查看管理員名單；新增或停用管理員需 Owner 操作。</p>}
+          <div className="admin-users-list">
+            {adminUsers.length === 0 ? <p className="subtle">暫無管理員資料。若這是首次部署，請先在 Supabase SQL Editor 執行新版 schema。</p> : adminUsers.map((user) => <div key={user.id} className={`admin-user-row ${user.active ? '' : 'inactive'}`}>
+              <div><b>{user.email}</b><small>{user.displayName || '未填顯示名稱'}</small></div>
+              <span className={`role-pill ${user.role}`}>{user.role === 'owner' ? 'Owner' : 'Admin'}</span>
+              <span>{user.active ? '啟用' : '停用'}</span>
+              {isOwner && user.active && user.email !== adminProfile?.email && <button className="danger" onClick={() => onDeactivateAdmin(user)}>停用</button>}
+            </div>)}
+          </div>
+        </section>
+
+        <section className="admin-card">
+          <div className="section-title compact-title"><div><p className="eyebrow">Requests</p><h3>需求刪除管理</h3></div></div>
+          <p className="subtle">刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p>
+          <RequestTable requests={filteredRequests} isAdmin={isAdmin} onEdit={onEditRequest} onDelete={onDeleteRequest} />
+        </section>
+      </div>
+    )}
+  </section>
+}
 
 function PrintHeader({ title, filters, count }: { title: string, filters: Filters, count: number }) {
   const printDate = new Date().toLocaleString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })

@@ -25,8 +25,15 @@ npm run dev
 1. 建立 Supabase 專案。
 2. 打開 Supabase → SQL Editor。
 3. 完整執行：`supabase/schema.sql`。
-4. Supabase → Authentication → Users → Add user，建立管理員帳號。
-5. 建議在 Supabase Authentication 設定中關閉公開註冊；此系統不提供一般使用者登入，一般人直接新增/修改需求即可。
+   - 如已經上線過，也請重新執行最新版 SQL；它會補建 `admin_users` 權限表，不會刪除既有需求資料。
+4. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
+   - 預設 owner email 已寫入 SQL：`tuotuoworm@outlook.com`。
+   - 如需更換 owner，請先修改 `supabase/schema.sql` 中 `insert into admin_users` 的 email。
+5. 之後可在網站「管理」頁直接維護管理員名單。
+   - Owner 可以新增/停用管理員。
+   - Admin 可以進入管理界面和刪除需求，但不能維護管理員名單。
+   - 不在 `admin_users` 名單中的 Auth 用戶即使有帳號密碼，也會提示無權限。
+6. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
 
 需要放入 GitHub Actions Secrets 的值：
 
