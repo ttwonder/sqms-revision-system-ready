@@ -20,6 +20,7 @@ const base: ChangeRequest = {
   createdAt: '2026-06-01T08:00:00.000Z',
   updatedAt: '2026-06-01T08:00:00.000Z',
   isDeleted: false,
+  requestSource: '外部檢查',
 }
 
 describe('Dashboard 統計', () => {
@@ -70,4 +71,20 @@ describe('Dashboard 統計', () => {
 
     expect(scoped.map((request) => request.id)).toEqual(['old-created-new-updated'])
   })
+
+  it('按需求來源篩選並統計來源分佈', () => {
+    const requests: ChangeRequest[] = [
+      { ...base, id: 'external', requestSource: '外部檢查' },
+      { ...base, id: 'meeting', requestSource: '安全會議' },
+      { ...base, id: 'meeting-2', requestSource: '安全會議', status: 'completed' },
+    ]
+
+    const scoped = filterRequests(requests, { requestSource: '安全會議' })
+    const stats = buildDashboardStats(requests, { requestSource: '安全會議' })
+
+    expect(scoped.map((request) => request.id)).toEqual(['meeting', 'meeting-2'])
+    expect(stats.total).toBe(2)
+    expect(stats.byRequestSource).toEqual({ '安全會議': 2 })
+  })
+
 })

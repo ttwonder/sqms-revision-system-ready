@@ -5,9 +5,10 @@ import {
 import { Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
-import type { AdminRole, AdminUser, ChangeRequest, RequestStatus, Urgency } from './types'
+import type { AdminRole, AdminUser, ChangeRequest, PersonnelRole, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
 import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest } from './lib/storage'
+import { DEFAULT_REQUEST_SOURCES, loadRequestSourceOptions, normalizeRequestSources, saveRequestSourceOptions } from './lib/requestSources'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
 import { fromDbAdminUser, isCloudConfigured, signupClient, supabase } from './lib/supabaseClient'
 
@@ -20,17 +21,28 @@ type Filters = {
   topicCode: string
   status: RequestStatus | 'all'
   urgency: Urgency | 'all'
+  requestSource: string
 }
 
-const emptyFilters: Filters = { from: '', to: '', categoryCode: '', topicCode: '', status: 'all', urgency: 'all' }
+const emptyFilters: Filters = { from: '', to: '', categoryCode: '', topicCode: '', status: 'all', urgency: 'all', requestSource: 'all' }
 const chartColors = ['#b8e0d2', '#f7c6c7', '#cdb4db', '#a2d2ff', '#ffd6a5', '#fdffb6', '#d0f4de']
 const duplicateSearchHint = '提出新需求前，請搜索是否類似需求已被提出。'
+const personnelDepartments = ['海務', '機務', '安監', '船員', '管理']
+const defaultPersonnel: Record<string, Array<{ name: string, role: PersonnelRole }>> = {
+  海務: [{ name: '海務主管', role: 'admin' }, { name: '海務操作員', role: 'operator' }],
+  機務: [{ name: '機務主管', role: 'admin' }, { name: '機務操作員', role: 'operator' }],
+  安監: [{ name: '安監主管', role: 'admin' }, { name: '安監操作員', role: 'operator' }],
+  船員: [{ name: '船員主管', role: 'admin' }],
+  管理: [{ name: '系統 Owner', role: 'admin' }],
+}
+const personnelStorageKey = 'sqms-personnel-roster-v1'
 
 function requestMatchesSearch(request: ChangeRequest, query: string) {
   const keyword = query.trim().toLowerCase()
   if (!keyword) return true
   const text = [
     request.requestNo,
+    request.requestSource,
     request.applicantName,
     request.categoryCode,
     getCategoryName(request.categoryCode),
@@ -66,6 +78,13 @@ function App() {
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
   const [newAdmin, setNewAdmin] = useState({ email: '', password: '', displayName: '', role: 'admin' as AdminRole })
+  const [requestSourceOptions, setRequestSourceOptions] = useState<string[]>(() => loadRequestSourceOptions())
+  const [newRequestSource, setNewRequestSource] = useState('')
+  const [personnelRoster, setPersonnelRoster] = useState<Record<string, Array<{ name: string, role: PersonnelRole }>>>(() => {
+    try { return JSON.parse(localStorage.getItem(personnelStorageKey) || 'null') ?? defaultPersonnel } catch { return defaultPersonnel }
+  })
+  const [newPerson, setNewPerson] = useState({ department: personnelDepartments[0], name: '', role: 'operator' as PersonnelRole })
+  const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
 
   async function refresh() {
     setLoading(true)
@@ -204,6 +223,62 @@ function App() {
     setMessage(`已軟刪除 ${request.requestNo}`)
   }
 
+  async function completeRequest(request: ChangeRequest, completionDate: string) {
+    const saved = await saveRequest({ ...request, status: 'completed', completionDate, updatedAt: new Date().toISOString() })
+    setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
+    setCompletingRequest(null)
+    setMessage(`已結案 ${saved.requestNo}，完成日期：${completionDate}`)
+  }
+
+  async function reopenRequest(request: ChangeRequest) {
+    const saved = await saveRequest({ ...request, status: 'processing', completionDate: '', updatedAt: new Date().toISOString() })
+    setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
+    setMessage(`已將 ${saved.requestNo} 轉回待完成。`)
+  }
+
+  function persistRequestSourceOptions(nextOptions: string[]) {
+    const normalized = normalizeRequestSources(nextOptions)
+    setRequestSourceOptions(normalized)
+    saveRequestSourceOptions(normalized)
+    if (!normalized.includes(form.requestSource)) setForm((current) => ({ ...current, requestSource: normalized[0] ?? DEFAULT_REQUEST_SOURCES[0] }))
+  }
+
+  function addRequestSourceOption() {
+    const value = newRequestSource.trim()
+    if (!value) return
+    persistRequestSourceOptions([...requestSourceOptions, value])
+    setNewRequestSource('')
+    setMessage(`已新增需求來源：${value}`)
+  }
+
+  function removeRequestSourceOption(value: string) {
+    if (!confirm(`確定移除來源項目「${value}」？既有需求資料仍保留原文字，但新建單不再提供此選項。`)) return
+    persistRequestSourceOptions(requestSourceOptions.filter((item) => item !== value))
+    setMessage(`已移除需求來源選項：${value}`)
+  }
+
+  function persistPersonnelRoster(nextRoster: Record<string, Array<{ name: string, role: PersonnelRole }>>) {
+    setPersonnelRoster(nextRoster)
+    localStorage.setItem(personnelStorageKey, JSON.stringify(nextRoster))
+  }
+
+  function addPersonnel() {
+    const name = newPerson.name.trim()
+    if (!name) return
+    const current = personnelRoster[newPerson.department] ?? []
+    const withoutDuplicate = current.filter((item) => item.name !== name)
+    persistPersonnelRoster({ ...personnelRoster, [newPerson.department]: [...withoutDuplicate, { name, role: newPerson.role }] })
+    setNewPerson({ ...newPerson, name: '' })
+  }
+
+  function updatePersonnelRole(department: string, name: string, role: PersonnelRole) {
+    persistPersonnelRoster({ ...personnelRoster, [department]: (personnelRoster[department] ?? []).map((item) => item.name === name ? { ...item, role } : item) })
+  }
+
+  function removePersonnel(department: string, name: string) {
+    persistPersonnelRoster({ ...personnelRoster, [department]: (personnelRoster[department] ?? []).filter((item) => item.name !== name) })
+  }
+
   async function handleAdminLogout() {
     await supabase?.auth.signOut()
     setAdminProfile(null)
@@ -332,6 +407,7 @@ function App() {
           <p className="duplicate-search-hint no-print">{duplicateSearchHint}</p>
           <form onSubmit={handleSubmit} className="request-form">
             <label>需求編號<input value={form.requestNo} onChange={(e) => updateForm('requestNo', e.target.value)} /></label>
+            <label>需求來源 *<select value={form.requestSource} onChange={(e) => updateForm('requestSource', e.target.value)}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
             <label>申請人 *<input value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
             <label>大類 *<select value={form.categoryCode} onChange={(e) => {
               const categoryCode = e.target.value
@@ -353,13 +429,13 @@ function App() {
         </section>
       )}
 
-      {tab === 'dashboard' && <Dashboard stats={stats} filters={filters} setFilters={setFilters} loading={loading} onRefresh={refresh} />}
+      {tab === 'dashboard' && <Dashboard stats={stats} filters={filters} setFilters={setFilters} loading={loading} onRefresh={refresh} requestSourceOptions={requestSourceOptions} />}
 
       {(tab === 'all' || tab === 'pending' || tab === 'completed') && (
         <section className="panel">
           <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
-          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
-          <RequestTable requests={listForActiveTab} isAdmin={isAdmin} onEdit={startEdit} onDelete={handleDelete} />
+          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} />
+          <RequestTable requests={listForActiveTab} isAdmin={isAdmin} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} />
         </section>
       )}
 
@@ -373,27 +449,42 @@ function App() {
           isAdmin={isAdmin}
           isOwner={isOwner}
           newAdmin={newAdmin}
+          requestSourceOptions={requestSourceOptions}
+          newRequestSource={newRequestSource}
+          personnelRoster={personnelRoster}
+          newPerson={newPerson}
           setAdminEmail={setAdminEmail}
           setAdminPassword={setAdminPassword}
           setNewAdmin={setNewAdmin}
+          setNewRequestSource={setNewRequestSource}
+          setNewPerson={setNewPerson}
           onAdminLogin={adminLogin}
           onAdminLogout={handleAdminLogout}
           onCreateAdmin={createAdminUser}
           onDeactivateAdmin={deactivateAdmin}
           onEditRequest={startEdit}
           onDeleteRequest={handleDelete}
+          onCompleteRequest={setCompletingRequest}
+          onReopenRequest={reopenRequest}
           onRefreshAdmins={refreshAdminUsers}
+          onAddRequestSource={addRequestSourceOption}
+          onRemoveRequestSource={removeRequestSourceOption}
+          onAddPersonnel={addPersonnel}
+          onUpdatePersonnelRole={updatePersonnelRole}
+          onRemovePersonnel={removePersonnel}
         />
       )}
+      {completingRequest && <CompletionDateModal request={completingRequest} onCancel={() => setCompletingRequest(null)} onConfirm={(date) => completeRequest(completingRequest, date)} />}
     </div>
   )
 }
 
-function Dashboard({ stats, filters, setFilters, loading, onRefresh }: { stats: ReturnType<typeof buildDashboardStats>, filters: Filters, setFilters: (f: Filters) => void, loading: boolean, onRefresh: () => void }) {
+function Dashboard({ stats, filters, setFilters, loading, onRefresh, requestSourceOptions }: { stats: ReturnType<typeof buildDashboardStats>, filters: Filters, setFilters: (f: Filters) => void, loading: boolean, onRefresh: () => void, requestSourceOptions: string[] }) {
   const categoryData = Object.entries(stats.byCategory).map(([name, value]) => ({ name, value }))
   const topicData = Object.entries(stats.byTopic).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name, value }))
+  const sourceData = Object.entries(stats.byRequestSource).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }))
   return <section className="panel dashboard-panel">
-    <ListHeader title="狀態 Dashboard" filters={filters} setFilters={setFilters} requests={[]} onRefresh={onRefresh} hideExports />
+    <ListHeader title="狀態 Dashboard" filters={filters} setFilters={setFilters} requests={[]} onRefresh={onRefresh} hideExports requestSourceOptions={requestSourceOptions} />
     <div className="kpi-grid">
       <Kpi label="提出件數" value={stats.total} tone="mint" />
       <Kpi label="完成件數" value={stats.completed} tone="blue" />
@@ -403,9 +494,11 @@ function Dashboard({ stats, filters, setFilters, loading, onRefresh }: { stats: 
       <Kpi label="逾期率" value={`${stats.overdueRate}%`} tone="orange" />
       <Kpi label="待完成" value={stats.pending} tone="yellow" />
     </div>
-    {loading ? <p>讀取中...</p> : <div className="chart-grid">
-      <div className="chart-card"><h3>各大類分佈</h3><ResponsiveContainer width="100%" height={230}><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={82} label>{categoryData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
+    {loading ? <p>讀取中...</p> : <div className="chart-grid three">
+      <div className="chart-card"><h3>需求來源分佈</h3><ResponsiveContainer width="100%" height={230}><PieChart><Pie data={sourceData} dataKey="value" nameKey="name" outerRadius={82} label>{sourceData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
+      <div className="chart-card"><h3>需求來源柱狀圖</h3><ResponsiveContainer width="100%" height={230}><BarChart data={sourceData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#cdb4db" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></div>
       <div className="chart-card"><h3>第一層主題 Top 8</h3><ResponsiveContainer width="100%" height={230}><BarChart data={topicData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#a2d2ff" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></div>
+      <div className="chart-card"><h3>各大類分佈</h3><ResponsiveContainer width="100%" height={230}><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={82} label>{categoryData.map((_, index) => <Cell key={index} fill={chartColors[(index + 2) % chartColors.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
     </div>}
   </section>
 }
@@ -421,19 +514,32 @@ type AdminPanelProps = {
   isAdmin: boolean
   isOwner: boolean
   newAdmin: { email: string, password: string, displayName: string, role: AdminRole }
+  requestSourceOptions: string[]
+  newRequestSource: string
+  personnelRoster: Record<string, Array<{ name: string, role: PersonnelRole }>>
+  newPerson: { department: string, name: string, role: PersonnelRole }
   setAdminEmail: (value: string) => void
   setAdminPassword: (value: string) => void
   setNewAdmin: (value: { email: string, password: string, displayName: string, role: AdminRole }) => void
+  setNewRequestSource: (value: string) => void
+  setNewPerson: (value: { department: string, name: string, role: PersonnelRole }) => void
   onAdminLogin: (event: React.FormEvent) => void
   onAdminLogout: () => void
   onCreateAdmin: (event: React.FormEvent) => void
   onDeactivateAdmin: (user: AdminUser) => void
   onEditRequest: (request: ChangeRequest) => void
   onDeleteRequest: (request: ChangeRequest) => void
+  onCompleteRequest: (request: ChangeRequest) => void
+  onReopenRequest: (request: ChangeRequest) => void
   onRefreshAdmins: () => void
+  onAddRequestSource: () => void
+  onRemoveRequestSource: (value: string) => void
+  onAddPersonnel: () => void
+  onUpdatePersonnelRole: (department: string, name: string, role: PersonnelRole) => void
+  onRemovePersonnel: (department: string, name: string) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, isAdmin, isOwner, newAdmin, setAdminEmail, setAdminPassword, setNewAdmin, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onRefreshAdmins }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, isAdmin, isOwner, newAdmin, requestSourceOptions, newRequestSource, personnelRoster, newPerson, setAdminEmail, setAdminPassword, setNewAdmin, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onRefreshAdmins, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelRole, onRemovePersonnel }: AdminPanelProps) {
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{isAdmin && <button className="ghost no-print" onClick={onAdminLogout}>登出</button>}</div>
     {!isAdmin ? (
@@ -450,8 +556,29 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filte
         <div className="admin-status">
           <strong>已登入：{adminProfile?.email}</strong>
           <span className={`role-pill ${adminProfile?.role}`}>{adminProfile?.role === 'owner' ? 'Owner' : 'Admin'}</span>
-          <span className="subtle">管理員可刪除需求；只有 Owner 可以新增/停用管理員。</span>
+          <span className="subtle">管理員可維護需求來源、人員名單與需求資料；Owner 可新增/停用雲端管理員。</span>
         </div>
+
+        <section className="admin-card">
+          <div className="section-title compact-title"><div><p className="eyebrow">Request Sources</p><h3>需求來源項目管理</h3></div></div>
+          <div className="source-option-form">
+            <input value={newRequestSource} onChange={(e) => setNewRequestSource(e.target.value)} placeholder="新增來源項目，例如：船隊要求" />
+            <button className="primary" type="button" onClick={onAddRequestSource}>新增來源</button>
+          </div>
+          <div className="source-option-list">{requestSourceOptions.map((source) => <span key={source} className="source-option-chip">{source}<button type="button" onClick={() => onRemoveRequestSource(source)}>×</button></span>)}</div>
+        </section>
+
+        <section className="admin-card">
+          <div className="section-title compact-title"><div><p className="eyebrow">Personnel</p><h3>人員與權限管控</h3></div></div>
+          <p className="subtle">採用 PSC 業內資訊管理平台式緊湊排版：按部門分組，人員 chip 內直接修改「操作員 / 管理員」。</p>
+          <div className="personnel-add-row">
+            <select value={newPerson.department} onChange={(e) => setNewPerson({ ...newPerson, department: e.target.value })}>{personnelDepartments.map((dept) => <option key={dept} value={dept}>{dept}</option>)}</select>
+            <input value={newPerson.name} onChange={(e) => setNewPerson({ ...newPerson, name: e.target.value })} placeholder="姓名" />
+            <select value={newPerson.role} onChange={(e) => setNewPerson({ ...newPerson, role: e.target.value as PersonnelRole })}><option value="operator">操作員</option><option value="admin">管理員</option></select>
+            <button className="primary" type="button" onClick={onAddPersonnel}><UserPlus size={14} />新增人員</button>
+          </div>
+          <div className="personnel-roster-grid">{personnelDepartments.map((dept) => <div key={dept} className="personnel-dept-row"><div className="dept-name"><b>{dept}</b><span>{personnelRoster[dept]?.length ?? 0} 人</span></div><div className="person-chip-wrap">{(personnelRoster[dept] ?? []).map((person) => <span key={`${dept}-${person.name}`} className="person-chip"><b>{person.name}</b><select value={person.role} onChange={(e) => onUpdatePersonnelRole(dept, person.name, e.target.value as PersonnelRole)}><option value="operator">操作員</option><option value="admin">管理員</option></select><button type="button" onClick={() => onRemovePersonnel(dept, person.name)}>×</button></span>)}</div></div>)}</div>
+        </section>
 
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Admins</p><h3>管理員名單</h3></div><button className="ghost" onClick={onRefreshAdmins}><RefreshCw size={14} />同步名單</button></div>
@@ -477,11 +604,24 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filte
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Requests</p><h3>需求刪除管理</h3></div></div>
           <p className="subtle">刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p>
-          <RequestTable requests={filteredRequests} isAdmin={isAdmin} onEdit={onEditRequest} onDelete={onDeleteRequest} />
+          <RequestTable requests={filteredRequests} isAdmin={isAdmin} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} />
         </section>
       </div>
     )}
   </section>
+}
+
+
+function CompletionDateModal({ request, onCancel, onConfirm }: { request: ChangeRequest, onCancel: () => void, onConfirm: (date: string) => void }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  return <div className="modal-backdrop no-print" role="dialog" aria-modal="true" aria-label="選擇完成日期">
+    <section className="completion-modal">
+      <p className="eyebrow">Close Request</p>
+      <h3>完成需求：{request.requestNo}</h3>
+      <label>實際完成日期<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+      <div className="modal-actions"><button className="ghost" type="button" onClick={onCancel}>取消</button><button className="primary" type="button" onClick={() => date && onConfirm(date)}>確認結案</button></div>
+    </section>
+  </div>
 }
 
 function PrintHeader({ title, filters, count, searchQuery = '' }: { title: string, filters: Filters, count: number, searchQuery?: string }) {
@@ -490,6 +630,7 @@ function PrintHeader({ title, filters, count, searchQuery = '' }: { title: strin
     filters.from || filters.to ? `日期：${filters.from || '不限'} 至 ${filters.to || '不限'}` : '日期：全部',
     filters.categoryCode ? `大類：${filters.categoryCode}` : '大類：全部',
     filters.topicCode ? `第一層主題：${filters.topicCode}` : '第一層主題：全部',
+    filters.requestSource !== 'all' ? `來源：${filters.requestSource}` : '來源：全部',
     filters.status !== 'all' ? `狀態：${statusLabels[filters.status]}` : '狀態：全部',
     filters.urgency !== 'all' ? `急迫度：${urgencyLabels[filters.urgency]}` : '急迫度：全部',
     searchQuery.trim() ? `關鍵詞：${searchQuery.trim()}` : '關鍵詞：全部',
@@ -507,7 +648,7 @@ function PrintHeader({ title, filters, count, searchQuery = '' }: { title: strin
   </div>
 }
 
-function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void }) {
+function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery, requestSourceOptions = DEFAULT_REQUEST_SOURCES as unknown as string[] }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void, requestSourceOptions?: string[] }) {
   const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []
   const [rangePreset, setRangePreset] = useState('')
   const applyRecentDays = (days: number) => {
@@ -545,6 +686,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       </select>
       <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
       <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+      <select value={filters.requestSource} onChange={(e) => setFilters({ ...filters, requestSource: e.target.value })}><option value="all">全部來源</option>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select>
       <select value={filters.categoryCode} onChange={(e) => setFilters({ ...filters, categoryCode: e.target.value, topicCode: '' })}><option value="">全部大類</option>{catalog.map((c) => <option key={c.code} value={c.code}>{c.code}｜{c.nameZh}</option>)}</select>
       <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{t.code}｜{t.titleZh}</option>)}</select>
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
@@ -554,13 +696,15 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
   </div>
 }
 
-function RequestTable({ requests, isAdmin, onEdit, onDelete }: { requests: ChangeRequest[], isAdmin: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void }) {
+function RequestTable({ requests, isAdmin, onEdit, onDelete, onComplete, onReopen }: { requests: ChangeRequest[], isAdmin: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void }) {
   const sorted = [...requests].sort((a, b) => {
     const overdueDiff = Number(isOverdue(b)) - Number(isOverdue(a))
     if (overdueDiff) return overdueDiff
     return a.targetDueDate.localeCompare(b.targetDueDate)
   })
-  return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr><th>狀態</th><th>急迫度</th><th>編號</th><th>歸屬</th><th>建議內容</th><th>期望日</th><th>申請人</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={8} className="empty">暫無資料</td></tr> : sorted.map((request) => <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span></td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>)}</tbody></table></div>
+  return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr><th>狀態</th><th>急迫度</th><th>編號</th><th>來源</th><th>歸屬</th><th>建議內容</th><th>期望日</th><th>申請人</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
+    const completed = request.status === 'completed'
+    return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span>{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
+  })}</tbody></table></div>
 }
-
 export default App

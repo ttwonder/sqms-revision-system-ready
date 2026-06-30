@@ -38,6 +38,7 @@ export function filterRequests(requests: ChangeRequest[], filters: DashboardFilt
     if (filters.topicCode && request.topicCode !== filters.topicCode) return false
     if (filters.status && filters.status !== 'all' && request.status !== filters.status) return false
     if (filters.urgency && filters.urgency !== 'all' && request.urgency !== filters.urgency) return false
+    if (filters.requestSource && filters.requestSource !== 'all' && request.requestSource !== filters.requestSource) return false
     return true
   })
 }
@@ -57,12 +58,14 @@ export function buildDashboardStats(requests: ChangeRequest[], filters: Dashboar
   const byTopic: Record<string, number> = {}
   const byStatus: Record<string, number> = {}
   const byUrgency: Record<string, number> = {}
+  const byRequestSource: Record<string, number> = {}
 
   scoped.forEach((request) => {
     addCount(byCategory, request.categoryCode)
     addCount(byTopic, request.topicCode)
     addCount(byStatus, request.status)
     addCount(byUrgency, request.urgency)
+    addCount(byRequestSource, request.requestSource || '未標記')
   })
 
   return {
@@ -77,5 +80,6 @@ export function buildDashboardStats(requests: ChangeRequest[], filters: Dashboar
     byTopic,
     byStatus,
     byUrgency,
+    byRequestSource,
   }
 }

@@ -25,7 +25,9 @@ export interface CatalogCategory {
 
 export type Urgency = 'urgent' | 'high' | 'medium' | 'low'
 export type RequestStatus = 'new' | 'processing' | 'completed' | 'cancelled'
+export type RequestSource = '外部檢查' | '內部檢查' | 'Master Review' | '安全會議' | 'MOC需求' | '法規/外部信息要求' | '事故/事件' | string
 export type AdminRole = 'owner' | 'admin'
+export type PersonnelRole = 'admin' | 'operator'
 
 export interface AdminUser {
   id: string
@@ -41,6 +43,7 @@ export interface ChangeRequest {
   id: string
   requestNo: string
   applicantName: string
+  requestSource: RequestSource
   categoryCode: CategoryCode | string
   topicCode: string
   manualItemCode?: string
@@ -69,6 +72,7 @@ export interface DashboardFilters {
   topicCode?: string
   status?: RequestStatus | 'all'
   urgency?: Urgency | 'all'
+  requestSource?: string
 }
 
 export interface DashboardStats {
@@ -83,4 +87,5 @@ export interface DashboardStats {
   byTopic: Record<string, number>
   byStatus: Record<string, number>
   byUrgency: Record<string, number>
+  byRequestSource: Record<string, number>
 }

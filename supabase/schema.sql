@@ -7,6 +7,7 @@ create table if not exists change_requests (
   id uuid primary key default gen_random_uuid(),
   request_no text not null unique,
   applicant_name text not null,
+  request_source text not null default '外部檢查',
   category_code text not null check (category_code in ('SMM','SMP','SMI','SQMS','ISO')),
   topic_code text not null,
   manual_item_code text,
@@ -27,7 +28,10 @@ create table if not exists change_requests (
   deleted_by text
 );
 
+alter table change_requests add column if not exists request_source text not null default '外部檢查';
+
 create index if not exists idx_change_requests_created_at on change_requests(created_at);
+create index if not exists idx_change_requests_source on change_requests(request_source);
 create index if not exists idx_change_requests_status on change_requests(status);
 create index if not exists idx_change_requests_due on change_requests(target_due_date);
 create index if not exists idx_change_requests_category on change_requests(category_code);

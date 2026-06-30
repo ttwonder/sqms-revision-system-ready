@@ -32,6 +32,7 @@ export function getItemLabel(topicCode?: string, itemCode?: string) {
 export function rowsForExport(requests: ChangeRequest[]) {
   return requests.map((request) => ({
     需求編號: request.requestNo,
+    需求來源: request.requestSource || '外部檢查',
     申請人: request.applicantName,
     大類: getCategoryName(request.categoryCode),
     第一層主題: getTopicLabel(request.topicCode),

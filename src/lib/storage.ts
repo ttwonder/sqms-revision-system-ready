@@ -1,10 +1,15 @@
 import type { ChangeRequest } from '../types'
 import { fromDbRequest, isCloudConfigured, supabase, toDbRequest } from './supabaseClient'
+import { DEFAULT_REQUEST_SOURCES } from './requestSources'
 
 const LOCAL_KEY = 'sqms-change-requests-v1'
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function normalizeLoadedRequest(request: ChangeRequest): ChangeRequest {
+  return { ...request, requestSource: request.requestSource || DEFAULT_REQUEST_SOURCES[0] }
 }
 
 export function makeRequestNo(sequence: number, date = new Date()) {
@@ -19,6 +24,7 @@ export function createBlankRequest(sequence: number): ChangeRequest {
     id: crypto.randomUUID(),
     requestNo: makeRequestNo(sequence),
     applicantName: '',
+    requestSource: '外部檢查',
     categoryCode: 'SMI',
     topicCode: 'SMI-01',
     manualItemCode: '',
@@ -44,10 +50,10 @@ export async function loadRequests(): Promise<ChangeRequest[]> {
       .eq('is_deleted', false)
       .order('created_at', { ascending: false })
     if (error) throw error
-    return (data ?? []).map(fromDbRequest)
+    return (data ?? []).map(fromDbRequest).map(normalizeLoadedRequest)
   }
   const raw = localStorage.getItem(LOCAL_KEY)
-  return raw ? JSON.parse(raw) : []
+  return raw ? JSON.parse(raw).map(normalizeLoadedRequest) : []
 }
 
 export async function saveRequest(request: ChangeRequest): Promise<ChangeRequest> {
