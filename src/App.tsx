@@ -10,7 +10,7 @@ import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib
 import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
 import { DEFAULT_REQUEST_SOURCES, loadRequestSourceOptions, normalizeRequestSources, saveRequestSourceOptions } from './lib/requestSources'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
-import { fromDbAdminUser, fromDbPersonnelUser, isCloudConfigured, supabase, toDbPersonnelUser } from './lib/supabaseClient'
+import { fromDbAdminUser, fromDbPersonnelUser, isCloudConfigured, supabase } from './lib/supabaseClient'
 
 type Tab = 'form' | 'dashboard' | 'all' | 'pending' | 'completed' | 'admin'
 
@@ -583,6 +583,22 @@ function App() {
     }
   }
 
+  async function savePersonnelToCloud(person: PersonnelUser): Promise<PersonnelUser> {
+    if (!supabase || !adminProfile) throw new Error('尚未連接雲端或 Owner 未登入。')
+    const { data, error } = await supabase.rpc('save_personnel_user_by_owner', {
+      p_id: person.id || null,
+      p_department: person.department,
+      p_name: person.name,
+      p_username: person.username || person.name,
+      p_password: person.password || '',
+      p_role: person.role,
+      p_active: person.active === undefined ? true : person.active,
+      p_sort_order: person.sortOrder || 0,
+    })
+    if (error) throw error
+    return fromDbPersonnelUser(data)
+  }
+
   async function saveAllPersonnel() {
     if (!isOwner) {
       setMessage('無權限：只有 owner 可以保存全部人員修改。')
@@ -596,11 +612,7 @@ function App() {
     try {
       if (supabase && adminProfile) {
         for (const person of people) {
-          const query = person.id
-            ? supabase.from('personnel_users').update(toDbPersonnelUser(person)).eq('id', person.id).select('id').single()
-            : supabase.from('personnel_users').insert(toDbPersonnelUser(person)).select('id').single()
-          const { error } = await query
-          if (error) throw error
+          await savePersonnelToCloud(person)
         }
         await refreshPersonnelUsers()
         setMessage(`已保存全部人員修改到雲端，共 ${people.length} 人。`)
@@ -633,18 +645,15 @@ function App() {
       return
     }
     if (supabase && adminProfile) {
-      const query = clean.id
-        ? supabase.from('personnel_users').update(toDbPersonnelUser(clean)).eq('id', clean.id).select('*').single()
-        : supabase.from('personnel_users').insert(toDbPersonnelUser(clean)).select('*').single()
-      const { data, error } = await query
-      if (error) {
-        setMessage(`人員保存失敗：${error.message}`)
-        return
+      try {
+        const saved = await savePersonnelToCloud(clean)
+        persistPersonnelRoster({ ...personnelRoster, [saved.department]: (personnelRoster[saved.department] ?? []).map((item) => item.id === saved.id || (!item.id && item.name === person.name) ? saved : item) })
+        setPersonnelDirty(false)
+        setMessage(`已保存人員到雲端：${saved.name}`)
+        await refreshPersonnelUsers()
+      } catch (error) {
+        setMessage(`人員保存失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
       }
-      const saved = fromDbPersonnelUser(data)
-      persistPersonnelRoster({ ...personnelRoster, [saved.department]: (personnelRoster[saved.department] ?? []).map((item) => item.id === saved.id || (!item.id && item.name === person.name) ? saved : item) })
-      setMessage(`已保存人員：${saved.name}`)
-      await refreshPersonnelUsers()
       return
     }
     persistPersonnelRoster({ ...personnelRoster, [clean.department]: (personnelRoster[clean.department] ?? []).map((item) => item === person ? clean : item) })
@@ -668,13 +677,14 @@ function App() {
       sortOrder: flattenPersonnelRoster(personnelRoster).length + 1,
     }
     if (supabase && adminProfile) {
-      const { data, error } = await supabase.from('personnel_users').insert(toDbPersonnelUser(newUser)).select('*').single()
-      if (error) {
-        setMessage(`新增人員失敗：${error.message}`)
+      try {
+        const saved = await savePersonnelToCloud(newUser)
+        persistPersonnelRoster({ ...personnelRoster, [saved.department]: [...(personnelRoster[saved.department] ?? []), saved] })
+        await refreshPersonnelUsers()
+      } catch (error) {
+        setMessage(`新增人員失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
         return
       }
-      const saved = fromDbPersonnelUser(data)
-      persistPersonnelRoster({ ...personnelRoster, [saved.department]: [...(personnelRoster[saved.department] ?? []), saved] })
     } else {
       persistPersonnelRoster({ ...personnelRoster, [newUser.department]: [...(personnelRoster[newUser.department] ?? []), newUser] })
     }
@@ -689,9 +699,11 @@ function App() {
     }
     if (!confirm(`確定停用人員「${person.name}」？`)) return
     if (supabase && adminProfile && person.id) {
-      const { error } = await supabase.from('personnel_users').update({ active: false }).eq('id', person.id)
-      if (error) {
-        setMessage(`停用人員失敗：${error.message}`)
+      try {
+        await savePersonnelToCloud({ ...person, active: false })
+        await refreshPersonnelUsers()
+      } catch (error) {
+        setMessage(`停用人員失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
         return
       }
     }

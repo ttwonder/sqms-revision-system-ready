@@ -178,20 +178,10 @@ with seed(department, name, username, role, active, sort_order) as (
     ('海技組', '林建志', '林建志', 'operator', true, 103),
     ('海技組', '張嘉珈', '張嘉珈', 'operator', true, 104),
     ('海技組', '吳易安', '吳易安', 'operator', true, 105)
-), upserted as (
-  insert into personnel_users (department, name, username, role, active, sort_order)
-  select department, name, username, role, active, sort_order from seed
-  on conflict (department, name) do update set
-    username = excluded.username,
-    role = excluded.role,
-    active = true,
-    sort_order = excluded.sort_order,
-    updated_at = now()
-  returning department, name
 )
-update personnel_users p
-set active = false, updated_at = now()
-where not exists (select 1 from seed s where s.department = p.department and s.name = p.name);
+insert into personnel_users (department, name, username, role, active, sort_order)
+select department, name, username, role, active, sort_order from seed
+on conflict (department, name) do nothing;
 
 create or replace view public_personnel_users as
 select
@@ -228,9 +218,101 @@ $$;
 
 grant execute on function verify_personnel_password(uuid, text) to anon, authenticated;
 
-create or replace function soft_delete_request_by_personnel(
+create or replace function save_personnel_user_by_owner(
+  p_id uuid,
+  p_department text,
+  p_name text,
+  p_username text,
+  p_password text,
+  p_role text,
+  p_active boolean,
+  p_sort_order integer
+)
+returns personnel_users
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  saved personnel_users;
+begin
+  if not is_sqms_owner() then
+    raise exception '只有 Owner 可以保存人員修改';
+  end if;
+
+  if coalesce(trim(p_name), '') = '' then
+    raise exception '人員姓名不可為空';
+  end if;
+
+  if p_role not in ('admin', 'operator') then
+    raise exception '人員角色不正確';
+  end if;
+
+  if p_id is null then
+    insert into personnel_users (department, name, username, password, role, active, sort_order)
+    values (
+      trim(p_department),
+      trim(p_name),
+      coalesce(nullif(trim(p_username), ''), trim(p_name)),
+      nullif(p_password, ''),
+      p_role,
+      coalesce(p_active, true),
+      coalesce(p_sort_order, 0)
+    )
+    on conflict (department, name) do update set
+      username = excluded.username,
+      password = excluded.password,
+      role = excluded.role,
+      active = excluded.active,
+      sort_order = excluded.sort_order,
+      updated_at = now()
+    returning * into saved;
+  else
+    update personnel_users
+    set
+      department = trim(p_department),
+      name = trim(p_name),
+      username = coalesce(nullif(trim(p_username), ''), trim(p_name)),
+      password = nullif(p_password, ''),
+      role = p_role,
+      active = coalesce(p_active, true),
+      sort_order = coalesce(p_sort_order, 0),
+      updated_at = now()
+    where id = p_id
+    returning * into saved;
+
+    if saved.id is null then
+      insert into personnel_users (id, department, name, username, password, role, active, sort_order)
+      values (
+        p_id,
+        trim(p_department),
+        trim(p_name),
+        coalesce(nullif(trim(p_username), ''), trim(p_name)),
+        nullif(p_password, ''),
+        p_role,
+        coalesce(p_active, true),
+        coalesce(p_sort_order, 0)
+      )
+      on conflict (department, name) do update set
+        username = excluded.username,
+        password = excluded.password,
+        role = excluded.role,
+        active = excluded.active,
+        sort_order = excluded.sort_order,
+        updated_at = now()
+      returning * into saved;
+    end if;
+  end if;
+
+  return saved;
+end;
+$$;
+
+grant execute on function save_personnel_user_by_owner(uuid, text, text, text, text, text, boolean, integer) to authenticated;
+
+create or replace function soft_delete_request_by_manager(
   p_request_id uuid,
-  p_personnel_id uuid,
+  p_personnel_id uuid default null,
   p_deleted_by text default null
 )
 returns boolean
@@ -241,7 +323,7 @@ as $$
 declare
   allowed boolean;
 begin
-  select exists (
+  select is_sqms_admin() or exists (
     select 1
     from personnel_users
     where id = p_personnel_id
@@ -259,13 +341,28 @@ begin
   set
     is_deleted = true,
     deleted_at = now(),
-    deleted_by = coalesce(nullif(p_deleted_by, ''), 'personnel-admin'),
+    deleted_by = coalesce(nullif(p_deleted_by, ''), 'manager'),
     updated_at = now()
   where id = p_request_id
     and is_deleted = false;
 
   return found;
 end;
+$$;
+
+grant execute on function soft_delete_request_by_manager(uuid, uuid, text) to anon, authenticated;
+
+create or replace function soft_delete_request_by_personnel(
+  p_request_id uuid,
+  p_personnel_id uuid,
+  p_deleted_by text default null
+)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select soft_delete_request_by_manager(p_request_id, p_personnel_id, p_deleted_by);
 $$;
 
 grant execute on function soft_delete_request_by_personnel(uuid, uuid, text) to anon, authenticated;

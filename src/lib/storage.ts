@@ -96,22 +96,13 @@ export async function updateRequestStatus(id: string, status: ChangeRequest['sta
 
 export async function softDeleteRequest(id: string, deletedBy = 'admin', personnel?: PersonnelUser | null): Promise<void> {
   if (isCloudConfigured && supabase) {
-    if (personnel?.role === 'admin') {
-      if (!personnel.id) throw new Error('人員管理員身份缺少雲端 ID，請重新進行人員登入 / 切換後再刪除。')
-      const { data, error } = await supabase.rpc('soft_delete_request_by_personnel', {
-        p_request_id: id,
-        p_personnel_id: personnel.id,
-        p_deleted_by: deletedBy,
-      })
-      if (error) throw error
-      if (data !== true) throw new Error('刪除未成功：此人員不是有效管理員，或該需求已不存在。')
-      return
-    }
-    const { error } = await supabase
-      .from('change_requests')
-      .update({ is_deleted: true, deleted_at: nowIso(), deleted_by: deletedBy })
-      .eq('id', id)
+    const { data, error } = await supabase.rpc('soft_delete_request_by_manager', {
+      p_request_id: id,
+      p_personnel_id: personnel?.id || null,
+      p_deleted_by: deletedBy,
+    })
     if (error) throw error
+    if (data !== true) throw new Error('刪除未成功：請確認目前身份是 Owner 或人員管理員，且 Supabase 已執行最新版 schema.sql。')
     return
   }
   const existing = await loadRequests()
