@@ -348,6 +348,8 @@ function App() {
   useEffect(() => {
     refresh()
     refreshPublicPersonnelUsers()
+    let autoSyncTimer: number | undefined
+    let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined
     if (supabase) {
       supabase.auth.getSession().then(async ({ data }) => {
         const email = data.session?.user.email
@@ -358,6 +360,15 @@ function App() {
           // 非管理員歷史登入狀態直接清理，不打擾普通填寫流程。
         }
       })
+      channel = supabase
+        .channel('sqms-change-requests-auto-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'change_requests' }, () => refresh())
+        .subscribe()
+      autoSyncTimer = window.setInterval(() => refresh(), 30000)
+    }
+    return () => {
+      if (autoSyncTimer) window.clearInterval(autoSyncTimer)
+      if (channel && supabase) supabase.removeChannel(channel)
     }
   }, [])
 
@@ -479,10 +490,15 @@ function App() {
 
   async function handleDelete(request: ChangeRequest) {
     if (!canManagePage) return
-    if (!confirm(`確定要刪除 ${request.requestNo}？此操作採軟刪除，前台不再顯示。`)) return
-    await softDeleteRequest(request.id, adminProfile?.email || 'admin')
-    setRequests((current) => current.filter((item) => item.id !== request.id))
-    setMessage(`已軟刪除 ${request.requestNo}`)
+    if (!confirm(`確定要刪除 ${request.requestNo}？此操作採軟刪除，雲端保留紀錄，但前台不再顯示。`)) return
+    const deletedBy = adminProfile?.email || (currentPerson ? `${currentPerson.department}/${currentPerson.name}` : 'admin')
+    try {
+      await softDeleteRequest(request.id, deletedBy, currentPerson)
+      await refresh()
+      setMessage(`已軟刪除 ${request.requestNo}，並已同步雲端。`)
+    } catch (error) {
+      setMessage(`刪除失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    }
   }
 
   async function completeRequest(request: ChangeRequest, completionDate: string) {

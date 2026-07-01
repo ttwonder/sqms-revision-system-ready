@@ -228,6 +228,48 @@ $$;
 
 grant execute on function verify_personnel_password(uuid, text) to anon, authenticated;
 
+create or replace function soft_delete_request_by_personnel(
+  p_request_id uuid,
+  p_personnel_id uuid,
+  p_deleted_by text default null
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  allowed boolean;
+begin
+  select exists (
+    select 1
+    from personnel_users
+    where id = p_personnel_id
+      and active = true
+      and role = 'admin'
+  ) into allowed;
+
+  if not allowed then
+    return false;
+  end if;
+
+  perform set_config('app.allow_personnel_soft_delete', 'on', true);
+
+  update change_requests
+  set
+    is_deleted = true,
+    deleted_at = now(),
+    deleted_by = coalesce(nullif(p_deleted_by, ''), 'personnel-admin'),
+    updated_at = now()
+  where id = p_request_id
+    and is_deleted = false;
+
+  return found;
+end;
+$$;
+
+grant execute on function soft_delete_request_by_personnel(uuid, uuid, text) to anon, authenticated;
+
 -- 首位 owner：請按需要修改為你的主要管理員 email。
 insert into admin_users (email, display_name, role, active)
 values ('tuotuoworm@outlook.com', 'System Owner', 'owner', true)
@@ -292,7 +334,7 @@ for each row execute function set_updated_at();
 create or replace function protect_public_delete_fields()
 returns trigger language plpgsql as $$
 begin
-  if not is_sqms_admin() then
+  if not is_sqms_admin() and current_setting('app.allow_personnel_soft_delete', true) <> 'on' then
     new.is_deleted := old.is_deleted;
     new.deleted_at := old.deleted_at;
     new.deleted_by := old.deleted_by;
