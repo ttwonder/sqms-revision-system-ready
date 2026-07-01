@@ -753,7 +753,7 @@ function App() {
         <section className="panel">
           <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
           <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} />
-          <RequestTable requests={listForActiveTab} isAdmin={isAdmin} canEditRequests={canEditRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} />
+          <RequestTable requests={listForActiveTab} isAdmin={canManagePage} canEditRequests={canEditRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} />
         </section>
       )}
 
