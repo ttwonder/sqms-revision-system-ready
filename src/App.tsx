@@ -7,7 +7,7 @@ import './App.css'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
-import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
+import { createBlankRequest, getNextRequestNo, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
 import { DEFAULT_REQUEST_SOURCES, loadRequestSourceOptions, normalizeRequestSources, saveRequestSourceOptions } from './lib/requestSources'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
 import { fromDbAdminUser, fromDbPersonnelUser, isCloudConfigured, supabase } from './lib/supabaseClient'
@@ -232,10 +232,13 @@ function publicPersonSession(person: PersonnelUser): PersonnelUser {
   return { ...person, password: '' }
 }
 
+type RequiredField = 'requestSource' | 'applicantName' | 'categoryCode' | 'topicCode' | 'targetDueDate' | 'suggestedChange' | 'changeReason'
+
 function App() {
   const [tab, setTab] = useState<Tab>('form')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
   const [form, setForm] = useState<ChangeRequest>(() => createBlankRequest(1))
+  const [missingFields, setMissingFields] = useState<RequiredField[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [searchQuery, setSearchQuery] = useState('')
@@ -350,6 +353,9 @@ function App() {
   useEffect(() => {
     refresh()
     refreshPublicPersonnelUsers()
+    getNextRequestNo().then((requestNo) => {
+      setForm((current) => ({ ...current, requestNo }))
+    }).catch(() => undefined)
     let autoSyncTimer: number | undefined
     let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined
     if (supabase) {
@@ -391,13 +397,30 @@ function App() {
   const itemOptions = getManualItemOptions(form.topicCode)
   const nextSequence = requests.length + 1
 
-  function updateForm<K extends keyof ChangeRequest>(key: K, value: ChangeRequest[K]) {
-    setForm((current) => ({ ...current, [key]: value }))
+  function fieldError(field: RequiredField) {
+    return missingFields.includes(field) ? 'field-error' : undefined
   }
 
-  function resetForm() {
+  async function blankRequestWithCloudNo() {
+    const blank = createBlankRequest(nextSequence + 1)
+    try {
+      return { ...blank, requestNo: await getNextRequestNo() }
+    } catch {
+      return blank
+    }
+  }
+
+  function updateForm<K extends keyof ChangeRequest>(key: K, value: ChangeRequest[K]) {
+    setForm((current) => ({ ...current, [key]: value }))
+    if (missingFields.includes(key as RequiredField) && String(value ?? '').trim()) {
+      setMissingFields((current) => current.filter((field) => field !== key))
+    }
+  }
+
+  async function resetForm() {
     setEditingId(null)
-    setForm(createBlankRequest(nextSequence + 1))
+    setMissingFields([])
+    setForm(await blankRequestWithCloudNo())
     setMessage('已切換到新增模式。')
     setTab('form')
   }
@@ -458,23 +481,38 @@ function App() {
       openPersonnelLogin()
       return
     }
-    if (!form.applicantName.trim() || !form.topicCode || !form.suggestedChange.trim() || !form.changeReason.trim() || !form.targetDueDate) {
-      setMessage('請填寫申請人、第一層主題、建議內容、修改理由與期望完成日期。')
+    const requiredMissing: RequiredField[] = []
+    if (!form.requestSource) requiredMissing.push('requestSource')
+    if (!form.applicantName.trim()) requiredMissing.push('applicantName')
+    if (!form.categoryCode) requiredMissing.push('categoryCode')
+    if (!form.topicCode) requiredMissing.push('topicCode')
+    if (!form.targetDueDate) requiredMissing.push('targetDueDate')
+    if (!form.suggestedChange.trim()) requiredMissing.push('suggestedChange')
+    if (!form.changeReason.trim()) requiredMissing.push('changeReason')
+    if (requiredMissing.length) {
+      setMissingFields(requiredMissing)
+      setMessage('請補齊紅色必填欄位後再提交。')
       return
     }
-    const saved = await saveRequest({
-      ...form,
-      requestNo: form.requestNo || `SQMS-TEMP-${Date.now()}`,
-      createdAt: form.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
-    setRequests((current) => {
-      const exists = current.some((item) => item.id === saved.id)
-      return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current]
-    })
-    setMessage(editingId ? `已更新 ${saved.requestNo}` : `已新增 ${saved.requestNo}`)
-    setEditingId(null)
-    setForm(createBlankRequest(nextSequence + 1))
+    setMissingFields([])
+    try {
+      const nextRequestNo = editingId ? form.requestNo : await getNextRequestNo()
+      const saved = await saveRequest({
+        ...form,
+        requestNo: nextRequestNo || form.requestNo || `SQMS-TEMP-${Date.now()}`,
+        createdAt: form.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      setRequests((current) => {
+        const exists = current.some((item) => item.id === saved.id)
+        return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current]
+      })
+      setMessage(editingId ? `已更新 ${saved.requestNo}` : `已新增 ${saved.requestNo}`)
+      setEditingId(null)
+      setForm(await blankRequestWithCloudNo())
+    } catch (error) {
+      setMessage(`新增/保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。如剛刪除過資料，請先執行最新版 Supabase schema.sql 後再試。`)
+    }
   }
 
   function startEdit(request: ChangeRequest) {
@@ -484,6 +522,7 @@ function App() {
       return
     }
     setEditingId(request.id)
+    setMissingFields([])
     setForm({ ...request })
     setTab('form')
     setMessage(`正在修改 ${request.requestNo}`)
@@ -799,21 +838,22 @@ function App() {
           <p className="duplicate-search-hint no-print">{duplicateSearchHint}</p>
           <form onSubmit={handleSubmit} className="request-form">
             <label>需求編號<input value={form.requestNo} onChange={(e) => updateForm('requestNo', e.target.value)} /></label>
-            <label>需求來源 *<select value={form.requestSource} onChange={(e) => updateForm('requestSource', e.target.value)}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
-            <label>申請人 *<input value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
-            <label>大類 *<select value={form.categoryCode} onChange={(e) => {
+            <label>需求來源 *<select className={fieldError('requestSource')} value={form.requestSource} onChange={(e) => updateForm('requestSource', e.target.value)}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
+            <label>申請人 *<input className={fieldError('applicantName')} value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
+            <label>大類 *<select className={fieldError('categoryCode')} value={form.categoryCode} onChange={(e) => {
               const categoryCode = e.target.value
               const firstTopic = getTopicOptions(categoryCode)[0]
               setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: '' }))
+              setMissingFields((current) => current.filter((field) => field !== 'categoryCode' && field !== 'topicCode'))
             }}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
-            <label>第一層主題 *<select value={form.topicCode} onChange={(e) => setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' }))}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
+            <label>第一層主題 *<select className={fieldError('topicCode')} value={form.topicCode} onChange={(e) => { setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' })); setMissingFields((current) => current.filter((field) => field !== 'topicCode')) }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
             <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item) => <option key={item.code} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
-            <label>期望完成日期 *<input type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
+            <label>期望完成日期 *<input className={fieldError('targetDueDate')} type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
             <label>急迫度<select value={form.urgency} onChange={(e) => updateForm('urgency', e.target.value as Urgency)}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label>狀態<select value={form.status} onChange={(e) => updateForm('status', e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="wide">修改內容歸屬補充<input value={form.scopeNote ?? ''} onChange={(e) => updateForm('scopeNote', e.target.value)} placeholder="例如：某段落、某表格、某流程" /></label>
-            <label className="wide">需改的建議內容或方向 *<textarea value={form.suggestedChange} onChange={(e) => updateForm('suggestedChange', e.target.value)} rows={4} /></label>
-            <label className="wide">需要修改的理由或依據 *<textarea value={form.changeReason} onChange={(e) => updateForm('changeReason', e.target.value)} rows={3} /></label>
+            <label className="wide">需改的建議內容或方向 *<textarea className={fieldError('suggestedChange')} value={form.suggestedChange} onChange={(e) => updateForm('suggestedChange', e.target.value)} rows={4} /></label>
+            <label className="wide">需要修改的理由或依據 *<textarea className={fieldError('changeReason')} value={form.changeReason} onChange={(e) => updateForm('changeReason', e.target.value)} rows={3} /></label>
             <label className="check"><input type="checkbox" checked={form.needRelatedFormUpdate} onChange={(e) => updateForm('needRelatedFormUpdate', e.target.checked)} /> 需要配套修改記錄表格</label>
             <label className="wide">推薦的修改內容或資料參考<textarea value={form.referenceMaterials ?? ''} onChange={(e) => updateForm('referenceMaterials', e.target.value)} rows={3} /></label>
             <div className="form-actions wide no-print"><button className="primary" type="submit">{editingId ? '保存修改' : '新增需求'}</button><button type="button" className="ghost" onClick={() => setTab('all')}>查看清單</button></div>

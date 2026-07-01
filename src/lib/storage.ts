@@ -56,6 +56,29 @@ export async function loadRequests(): Promise<ChangeRequest[]> {
   return raw ? JSON.parse(raw).map(normalizeLoadedRequest) : []
 }
 
+function requestNoPrefix(date = new Date()) {
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  return `SQMS-${yyyy}${mm}-`
+}
+
+export async function getNextRequestNo(date = new Date()): Promise<string> {
+  const prefix = requestNoPrefix(date)
+  if (isCloudConfigured && supabase) {
+    const { data, error } = await supabase.rpc('next_sqms_request_no')
+    if (!error && typeof data === 'string' && data) return data
+    // 若線上還沒執行新版 SQL，先用時間尾碼避免撞到已軟刪除資料的舊編號，讓新增不中斷。
+    return `${prefix}${String(Date.now()).slice(-6)}`
+  }
+  const existing = await loadRequests()
+  const maxSeq = existing.reduce((max, item) => {
+    if (!item.requestNo?.startsWith(prefix)) return max
+    const seq = Number(item.requestNo.slice(prefix.length))
+    return Number.isFinite(seq) ? Math.max(max, seq) : max
+  }, 0)
+  return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`
+}
+
 export async function saveRequest(request: ChangeRequest): Promise<ChangeRequest> {
   const clean: ChangeRequest = { ...request, updatedAt: nowIso() }
   if (isCloudConfigured && supabase) {

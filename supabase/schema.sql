@@ -218,6 +218,28 @@ $$;
 
 grant execute on function verify_personnel_password(uuid, text) to anon, authenticated;
 
+create or replace function next_sqms_request_no(p_on_date date default current_date)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  prefix text := 'SQMS-' || to_char(p_on_date, 'YYYYMM') || '-';
+  pattern text := '^' || prefix || '([0-9]+)$';
+  next_seq integer;
+begin
+  select coalesce(max(((regexp_match(request_no, pattern))[1])::integer), 0) + 1
+  into next_seq
+  from change_requests
+  where request_no ~ pattern;
+
+  return prefix || lpad(next_seq::text, 3, '0');
+end;
+$$;
+
+grant execute on function next_sqms_request_no(date) to anon, authenticated;
+
 create or replace function save_personnel_user_by_owner(
   p_id uuid,
   p_department text,
