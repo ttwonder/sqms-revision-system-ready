@@ -29,6 +29,19 @@ export type RequestSource = '外部檢查' | '內部檢查' | 'Master Review' | 
 export type AdminRole = 'owner' | 'admin'
 export type PersonnelRole = 'admin' | 'operator'
 
+export interface PersonnelUser {
+  id?: string
+  department: string
+  name: string
+  username: string
+  password?: string
+  role: PersonnelRole
+  active: boolean
+  sortOrder: number
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface AdminUser {
   id: string
   email: string

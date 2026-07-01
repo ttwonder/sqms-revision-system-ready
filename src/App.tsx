@@ -5,12 +5,12 @@ import {
 import { Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
-import type { AdminRole, AdminUser, ChangeRequest, PersonnelRole, RequestStatus, Urgency } from './types'
+import type { AdminRole, AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
-import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest } from './lib/storage'
+import { createBlankRequest, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
 import { DEFAULT_REQUEST_SOURCES, loadRequestSourceOptions, normalizeRequestSources, saveRequestSourceOptions } from './lib/requestSources'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
-import { fromDbAdminUser, isCloudConfigured, signupClient, supabase } from './lib/supabaseClient'
+import { fromDbAdminUser, fromDbPersonnelUser, isCloudConfigured, signupClient, supabase, toDbPersonnelUser } from './lib/supabaseClient'
 
 type Tab = 'form' | 'dashboard' | 'all' | 'pending' | 'completed' | 'admin'
 
@@ -27,15 +27,137 @@ type Filters = {
 const emptyFilters: Filters = { from: '', to: '', categoryCode: '', topicCode: '', status: 'all', urgency: 'all', requestSource: 'all' }
 const chartColors = ['#b8e0d2', '#f7c6c7', '#cdb4db', '#a2d2ff', '#ffd6a5', '#fdffb6', '#d0f4de']
 const duplicateSearchHint = '提出新需求前，請搜索是否類似需求已被提出。'
-const personnelDepartments = ['海務', '機務', '安監', '船員', '管理']
-const defaultPersonnel: Record<string, Array<{ name: string, role: PersonnelRole }>> = {
-  海務: [{ name: '海務主管', role: 'admin' }, { name: '海務操作員', role: 'operator' }],
-  機務: [{ name: '機務主管', role: 'admin' }, { name: '機務操作員', role: 'operator' }],
-  安監: [{ name: '安監主管', role: 'admin' }, { name: '安監操作員', role: 'operator' }],
-  船員: [{ name: '船員主管', role: 'admin' }],
-  管理: [{ name: '系統 Owner', role: 'admin' }],
+const personnelDepartments = ['管理層', '管理組', '資材組', '營業處', '船工處', '安衛處', '航運處', '督導', '船員組', '航運組', '海技組']
+const defaultPersonnel: Record<string, PersonnelUser[]> = {
+  '管理層': [
+    { department: '管理層', name: '呂學修副總', username: '呂學修副總', password: '', role: 'operator', active: true, sortOrder: 1 },
+    { department: '管理層', name: '蔡宏仁協理', username: '蔡宏仁協理', password: '', role: 'operator', active: true, sortOrder: 2 },
+    { department: '管理層', name: '李勻寧協理', username: '李勻寧協理', password: '', role: 'operator', active: true, sortOrder: 3 },
+  ],
+  '管理組': [
+    { department: '管理組', name: '陳治先', username: '陳治先', password: '', role: 'operator', active: true, sortOrder: 4 },
+    { department: '管理組', name: '王昱民', username: '王昱民', password: '', role: 'operator', active: true, sortOrder: 5 },
+    { department: '管理組', name: '方憲鵬組長', username: '方憲鵬組長', password: '', role: 'operator', active: true, sortOrder: 6 },
+    { department: '管理組', name: '陳韋自', username: '陳韋自', password: '', role: 'operator', active: true, sortOrder: 7 },
+    { department: '管理組', name: '紀煒邦', username: '紀煒邦', password: '', role: 'operator', active: true, sortOrder: 8 },
+    { department: '管理組', name: '李雅雯', username: '李雅雯', password: '', role: 'operator', active: true, sortOrder: 9 },
+    { department: '管理組', name: '曾湘柔', username: '曾湘柔', password: '', role: 'operator', active: true, sortOrder: 10 },
+    { department: '管理組', name: '周麗如', username: '周麗如', password: '', role: 'operator', active: true, sortOrder: 11 },
+  ],
+  '資材組': [
+    { department: '資材組', name: '林建瑋', username: '林建瑋', password: '', role: 'operator', active: true, sortOrder: 12 },
+    { department: '資材組', name: '鄧兆修', username: '鄧兆修', password: '', role: 'operator', active: true, sortOrder: 13 },
+    { department: '資材組', name: '鄧浚宏', username: '鄧浚宏', password: '', role: 'operator', active: true, sortOrder: 14 },
+    { department: '資材組', name: '徐永兆', username: '徐永兆', password: '', role: 'operator', active: true, sortOrder: 15 },
+    { department: '資材組', name: '王梓名', username: '王梓名', password: '', role: 'operator', active: true, sortOrder: 16 },
+    { department: '資材組', name: '林大詠', username: '林大詠', password: '', role: 'operator', active: true, sortOrder: 17 },
+    { department: '資材組', name: '周瑞廉組長', username: '周瑞廉組長', password: '', role: 'operator', active: true, sortOrder: 18 },
+    { department: '資材組', name: '楊延興', username: '楊延興', password: '', role: 'operator', active: true, sortOrder: 19 },
+    { department: '資材組', name: '許政子', username: '許政子', password: '', role: 'operator', active: true, sortOrder: 20 },
+    { department: '資材組', name: '楊絜崴', username: '楊絜崴', password: '', role: 'operator', active: true, sortOrder: 21 },
+  ],
+  '營業處': [
+    { department: '營業處', name: '王慈芬', username: '王慈芬', password: '', role: 'operator', active: true, sortOrder: 22 },
+    { department: '營業處', name: '劉小萍', username: '劉小萍', password: '', role: 'operator', active: true, sortOrder: 23 },
+    { department: '營業處', name: '翁敏芳', username: '翁敏芳', password: '', role: 'operator', active: true, sortOrder: 24 },
+    { department: '營業處', name: '李純瑛', username: '李純瑛', password: '', role: 'operator', active: true, sortOrder: 25 },
+    { department: '營業處', name: '魏利育', username: '魏利育', password: '', role: 'operator', active: true, sortOrder: 26 },
+    { department: '營業處', name: '賴思妤', username: '賴思妤', password: '', role: 'operator', active: true, sortOrder: 27 },
+    { department: '營業處', name: '陳建中', username: '陳建中', password: '', role: 'operator', active: true, sortOrder: 28 },
+    { department: '營業處', name: '粘家萍', username: '粘家萍', password: '', role: 'operator', active: true, sortOrder: 29 },
+    { department: '營業處', name: '邱義泰', username: '邱義泰', password: '', role: 'operator', active: true, sortOrder: 30 },
+    { department: '營業處', name: '倪嘉', username: '倪嘉', password: '', role: 'operator', active: true, sortOrder: 31 },
+    { department: '營業處', name: '李耿志', username: '李耿志', password: '', role: 'operator', active: true, sortOrder: 32 },
+  ],
+  '船工處': [
+    { department: '船工處', name: '廖晥妤', username: '廖晥妤', password: '', role: 'operator', active: true, sortOrder: 33 },
+    { department: '船工處', name: '吳燕桂', username: '吳燕桂', password: '', role: 'operator', active: true, sortOrder: 34 },
+    { department: '船工處', name: '楊弘羽', username: '楊弘羽', password: '', role: 'operator', active: true, sortOrder: 35 },
+    { department: '船工處', name: '王威譯', username: '王威譯', password: '', role: 'operator', active: true, sortOrder: 36 },
+    { department: '船工處', name: '李曜均', username: '李曜均', password: '', role: 'operator', active: true, sortOrder: 37 },
+    { department: '船工處', name: '劉煥章處長', username: '劉煥章處長', password: '', role: 'operator', active: true, sortOrder: 38 },
+    { department: '船工處', name: '林冠辰', username: '林冠辰', password: '', role: 'operator', active: true, sortOrder: 39 },
+    { department: '船工處', name: '盧玉玫', username: '盧玉玫', password: '', role: 'operator', active: true, sortOrder: 40 },
+    { department: '船工處', name: '林儀婷', username: '林儀婷', password: '', role: 'operator', active: true, sortOrder: 41 },
+    { department: '船工處', name: '王昱斌', username: '王昱斌', password: '', role: 'operator', active: true, sortOrder: 42 },
+    { department: '船工處', name: '賴朝瑜', username: '賴朝瑜', password: '', role: 'operator', active: true, sortOrder: 43 },
+    { department: '船工處', name: '陳思翰', username: '陳思翰', password: '', role: 'operator', active: true, sortOrder: 44 },
+    { department: '船工處', name: '顏仲楷', username: '顏仲楷', password: '', role: 'operator', active: true, sortOrder: 45 },
+  ],
+  '安衛處': [
+    { department: '安衛處', name: '楊順婷', username: '楊順婷', password: '', role: 'operator', active: true, sortOrder: 46 },
+    { department: '安衛處', name: '施品帆', username: '施品帆', password: '', role: 'operator', active: true, sortOrder: 47 },
+    { department: '安衛處', name: '紀芳琪', username: '紀芳琪', password: '', role: 'operator', active: true, sortOrder: 48 },
+    { department: '安衛處', name: '蘇上銘', username: '蘇上銘', password: '', role: 'operator', active: true, sortOrder: 49 },
+    { department: '安衛處', name: '韓竹雅', username: '韓竹雅', password: '', role: 'operator', active: true, sortOrder: 50 },
+    { department: '安衛處', name: '劉定淮', username: '劉定淮', password: '', role: 'operator', active: true, sortOrder: 51 },
+    { department: '安衛處', name: '江佳勳', username: '江佳勳', password: '', role: 'operator', active: true, sortOrder: 52 },
+    { department: '安衛處', name: '張鼎東', username: '張鼎東', password: '', role: 'operator', active: true, sortOrder: 53 },
+  ],
+  '航運處': [
+    { department: '航運處', name: '吳建泰處長', username: '吳建泰處長', password: '', role: 'operator', active: true, sortOrder: 54 },
+  ],
+  '督導': [
+    { department: '督導', name: '尹德垿', username: '尹德垿', password: '', role: 'operator', active: true, sortOrder: 55 },
+    { department: '督導', name: '蔡繼來', username: '蔡繼來', password: '', role: 'operator', active: true, sortOrder: 56 },
+    { department: '督導', name: '翁振傑', username: '翁振傑', password: '', role: 'operator', active: true, sortOrder: 57 },
+    { department: '督導', name: '黃傑治', username: '黃傑治', password: '', role: 'operator', active: true, sortOrder: 58 },
+    { department: '督導', name: '陳寰頤', username: '陳寰頤', password: '', role: 'operator', active: true, sortOrder: 59 },
+    { department: '督導', name: '李幸龍', username: '李幸龍', password: '', role: 'operator', active: true, sortOrder: 60 },
+    { department: '督導', name: '廖麗蓁', username: '廖麗蓁', password: '', role: 'operator', active: true, sortOrder: 61 },
+    { department: '督導', name: '張議榮', username: '張議榮', password: '', role: 'operator', active: true, sortOrder: 62 },
+    { department: '督導', name: '林滄龍', username: '林滄龍', password: '', role: 'operator', active: true, sortOrder: 63 },
+    { department: '督導', name: '蔡明哲', username: '蔡明哲', password: '', role: 'operator', active: true, sortOrder: 64 },
+    { department: '督導', name: '陳昱宏', username: '陳昱宏', password: '', role: 'operator', active: true, sortOrder: 65 },
+    { department: '督導', name: '陳思慧', username: '陳思慧', password: '', role: 'operator', active: true, sortOrder: 66 },
+    { department: '督導', name: '張雅琪', username: '張雅琪', password: '', role: 'operator', active: true, sortOrder: 67 },
+    { department: '督導', name: '張和中', username: '張和中', password: '', role: 'operator', active: true, sortOrder: 68 },
+    { department: '督導', name: '張志林', username: '張志林', password: '', role: 'operator', active: true, sortOrder: 69 },
+    { department: '督導', name: '餘雙', username: '餘雙', password: '', role: 'operator', active: true, sortOrder: 70 },
+    { department: '督導', name: '唐洪新', username: '唐洪新', password: '', role: 'operator', active: true, sortOrder: 71 },
+    { department: '督導', name: '秦冰', username: '秦冰', password: '', role: 'operator', active: true, sortOrder: 72 },
+    { department: '督導', name: '黃燕華', username: '黃燕華', password: '', role: 'operator', active: true, sortOrder: 73 },
+    { department: '督導', name: '潘獻波', username: '潘獻波', password: '', role: 'operator', active: true, sortOrder: 74 },
+    { department: '督導', name: '毛剛', username: '毛剛', password: '', role: 'operator', active: true, sortOrder: 75 },
+  ],
+  '船員組': [
+    { department: '船員組', name: '徐意倫', username: '徐意倫', password: '', role: 'operator', active: true, sortOrder: 76 },
+    { department: '船員組', name: '古美雪', username: '古美雪', password: '', role: 'operator', active: true, sortOrder: 77 },
+    { department: '船員組', name: '薛英林', username: '薛英林', password: '', role: 'operator', active: true, sortOrder: 78 },
+    { department: '船員組', name: '張育菁', username: '張育菁', password: '', role: 'operator', active: true, sortOrder: 79 },
+    { department: '船員組', name: '謝嘉穎', username: '謝嘉穎', password: '', role: 'operator', active: true, sortOrder: 80 },
+    { department: '船員組', name: '王鈺婷', username: '王鈺婷', password: '', role: 'operator', active: true, sortOrder: 81 },
+    { department: '船員組', name: '湯雅帆', username: '湯雅帆', password: '', role: 'operator', active: true, sortOrder: 82 },
+    { department: '船員組', name: '陳必恆', username: '陳必恆', password: '', role: 'operator', active: true, sortOrder: 83 },
+    { department: '船員組', name: '林竺諼', username: '林竺諼', password: '', role: 'operator', active: true, sortOrder: 84 },
+    { department: '船員組', name: '鄭詩璇', username: '鄭詩璇', password: '', role: 'operator', active: true, sortOrder: 85 },
+    { department: '船員組', name: '陳昱勳', username: '陳昱勳', password: '', role: 'operator', active: true, sortOrder: 86 },
+    { department: '船員組', name: '胡峻瑋', username: '胡峻瑋', password: '', role: 'operator', active: true, sortOrder: 87 },
+    { department: '船員組', name: '吳思葦', username: '吳思葦', password: '', role: 'operator', active: true, sortOrder: 88 },
+  ],
+  '航運組': [
+    { department: '航運組', name: '陳秀玉', username: '陳秀玉', password: '', role: 'operator', active: true, sortOrder: 89 },
+    { department: '航運組', name: '黃駿達', username: '黃駿達', password: '', role: 'operator', active: true, sortOrder: 90 },
+    { department: '航運組', name: '江嘉卿', username: '江嘉卿', password: '', role: 'operator', active: true, sortOrder: 91 },
+    { department: '航運組', name: '陳秋縈', username: '陳秋縈', password: '', role: 'operator', active: true, sortOrder: 92 },
+    { department: '航運組', name: '溫雅媛', username: '溫雅媛', password: '', role: 'operator', active: true, sortOrder: 93 },
+    { department: '航運組', name: '王聖傑', username: '王聖傑', password: '', role: 'operator', active: true, sortOrder: 94 },
+    { department: '航運組', name: '楊治華', username: '楊治華', password: '', role: 'operator', active: true, sortOrder: 95 },
+    { department: '航運組', name: '謝侑糖', username: '謝侑糖', password: '', role: 'operator', active: true, sortOrder: 96 },
+    { department: '航運組', name: '劉彥輝', username: '劉彥輝', password: '', role: 'operator', active: true, sortOrder: 97 },
+    { department: '航運組', name: '陳芮蓁', username: '陳芮蓁', password: '', role: 'operator', active: true, sortOrder: 98 },
+  ],
+  '海技組': [
+    { department: '海技組', name: '朱世毅', username: '朱世毅', password: '', role: 'operator', active: true, sortOrder: 99 },
+    { department: '海技組', name: '陳宜斌', username: '陳宜斌', password: '', role: 'operator', active: true, sortOrder: 100 },
+    { department: '海技組', name: '柯香吟', username: '柯香吟', password: '', role: 'operator', active: true, sortOrder: 101 },
+    { department: '海技組', name: '陳思樺', username: '陳思樺', password: '', role: 'operator', active: true, sortOrder: 102 },
+    { department: '海技組', name: '林建志', username: '林建志', password: '', role: 'operator', active: true, sortOrder: 103 },
+    { department: '海技組', name: '張嘉珈', username: '張嘉珈', password: '', role: 'operator', active: true, sortOrder: 104 },
+    { department: '海技組', name: '吳易安', username: '吳易安', password: '', role: 'operator', active: true, sortOrder: 105 },
+  ],
 }
-const personnelStorageKey = 'sqms-personnel-roster-v1'
+const personnelStorageKey = 'sqms-personnel-roster-v2'
 
 function requestMatchesSearch(request: ChangeRequest, query: string) {
   const keyword = query.trim().toLowerCase()
@@ -64,6 +186,42 @@ function requestMatchesSearch(request: ChangeRequest, query: string) {
   return text.includes(keyword)
 }
 
+function normalizePersonnelRoster(value: unknown): Record<string, PersonnelUser[]> {
+  const source = (value && typeof value === 'object' ? value : defaultPersonnel) as Record<string, Array<Partial<PersonnelUser>>>
+  const normalized: Record<string, PersonnelUser[]> = {}
+  personnelDepartments.forEach((department) => {
+    normalized[department] = (source[department] ?? defaultPersonnel[department] ?? []).map((person, index) => ({
+      id: person.id,
+      department,
+      name: (person.name || '').trim(),
+      username: (person.username || person.name || '').trim(),
+      password: person.password || '',
+      role: (person.role === 'admin' ? 'admin' : 'operator') as PersonnelRole,
+      active: person.active !== false,
+      sortOrder: Number(person.sortOrder ?? index + 1),
+      createdAt: person.createdAt,
+      updatedAt: person.updatedAt,
+    })).filter((person) => person.name && person.active)
+  })
+  return normalized
+}
+
+function groupPersonnelUsers(users: PersonnelUser[]): Record<string, PersonnelUser[]> {
+  const grouped = normalizePersonnelRoster({})
+  personnelDepartments.forEach((department) => { grouped[department] = [] })
+  users.forEach((user) => {
+    const department = user.department || personnelDepartments[0]
+    if (!grouped[department]) grouped[department] = []
+    grouped[department].push({ ...user, username: user.username || user.name, password: user.password || '' })
+  })
+  Object.keys(grouped).forEach((department) => grouped[department].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-Hant')))
+  return grouped
+}
+
+function flattenPersonnelRoster(roster: Record<string, PersonnelUser[]>): PersonnelUser[] {
+  return Object.values(roster).flat()
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('form')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
@@ -80,10 +238,10 @@ function App() {
   const [newAdmin, setNewAdmin] = useState({ email: '', password: '', displayName: '', role: 'admin' as AdminRole })
   const [requestSourceOptions, setRequestSourceOptions] = useState<string[]>(() => loadRequestSourceOptions())
   const [newRequestSource, setNewRequestSource] = useState('')
-  const [personnelRoster, setPersonnelRoster] = useState<Record<string, Array<{ name: string, role: PersonnelRole }>>>(() => {
-    try { return JSON.parse(localStorage.getItem(personnelStorageKey) || 'null') ?? defaultPersonnel } catch { return defaultPersonnel }
+  const [personnelRoster, setPersonnelRoster] = useState<Record<string, PersonnelUser[]>>(() => {
+    try { return normalizePersonnelRoster(JSON.parse(localStorage.getItem(personnelStorageKey) || 'null')) } catch { return normalizePersonnelRoster(defaultPersonnel) }
   })
-  const [newPerson, setNewPerson] = useState({ department: personnelDepartments[0], name: '', role: 'operator' as PersonnelRole })
+  const [newPerson, setNewPerson] = useState({ department: personnelDepartments[0], name: '', username: '', password: '', role: 'operator' as PersonnelRole })
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
 
   async function refresh() {
@@ -129,6 +287,28 @@ function App() {
     setAdminUsers((data ?? []).map(fromDbAdminUser))
   }
 
+  async function refreshPersonnelUsers() {
+    if (!supabase || !adminProfile) return
+    const { data, error } = await supabase
+      .from('personnel_users')
+      .select('*')
+      .eq('active', true)
+      .order('sort_order')
+      .order('department')
+      .order('name')
+    if (error) {
+      if (error.message.includes('personnel_users') || error.code === '42P01') {
+        setMessage('人員權限表尚未建立，請先在 Supabase SQL Editor 執行最新版 supabase/schema.sql；目前先顯示內建人員名單。')
+        setPersonnelRoster(normalizePersonnelRoster(defaultPersonnel))
+        return
+      }
+      setMessage(`人員名單讀取失敗：${error.message}`)
+      return
+    }
+    const cloudRoster = (data ?? []).map(fromDbPersonnelUser)
+    setPersonnelRoster(cloudRoster.length ? groupPersonnelUsers(cloudRoster) : normalizePersonnelRoster(defaultPersonnel))
+  }
+
   async function acceptAdminSession(email: string) {
     const profile = await loadAdminProfile(email)
     if (!profile) {
@@ -145,6 +325,17 @@ function App() {
       .order('role', { ascending: false })
       .order('email') ?? { data: [] }
     setAdminUsers((data ?? []).map(fromDbAdminUser))
+    const { data: personnelRows, error: personnelError } = await supabase
+      ?.from('personnel_users')
+      .select('*')
+      .eq('active', true)
+      .order('sort_order')
+      .order('department')
+      .order('name') ?? { data: [], error: null }
+    if (!personnelError) {
+      const cloudRoster = (personnelRows ?? []).map(fromDbPersonnelUser)
+      setPersonnelRoster(cloudRoster.length ? groupPersonnelUsers(cloudRoster) : normalizePersonnelRoster(defaultPersonnel))
+    }
     return profile
   }
 
@@ -224,16 +415,24 @@ function App() {
   }
 
   async function completeRequest(request: ChangeRequest, completionDate: string) {
-    const saved = await saveRequest({ ...request, status: 'completed', completionDate, updatedAt: new Date().toISOString() })
-    setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
-    setCompletingRequest(null)
-    setMessage(`已結案 ${saved.requestNo}，完成日期：${completionDate}`)
+    try {
+      const saved = await updateRequestStatus(request.id, 'completed', completionDate)
+      setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setCompletingRequest(null)
+      setMessage(`已結案 ${saved.requestNo}，完成日期：${completionDate}`)
+    } catch (error) {
+      setMessage(`結案失敗：${error instanceof Error ? error.message : '未知錯誤'}。請確認 Supabase 已執行最新版 schema.sql。`)
+    }
   }
 
   async function reopenRequest(request: ChangeRequest) {
-    const saved = await saveRequest({ ...request, status: 'processing', completionDate: '', updatedAt: new Date().toISOString() })
-    setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
-    setMessage(`已將 ${saved.requestNo} 轉回待完成。`)
+    try {
+      const saved = await updateRequestStatus(request.id, 'processing')
+      setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setMessage(`已將 ${saved.requestNo} 轉回待完成。`)
+    } catch (error) {
+      setMessage(`轉回待完成失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    }
   }
 
   function persistRequestSourceOptions(nextOptions: string[]) {
@@ -257,26 +456,103 @@ function App() {
     setMessage(`已移除需求來源選項：${value}`)
   }
 
-  function persistPersonnelRoster(nextRoster: Record<string, Array<{ name: string, role: PersonnelRole }>>) {
-    setPersonnelRoster(nextRoster)
-    localStorage.setItem(personnelStorageKey, JSON.stringify(nextRoster))
+  function persistPersonnelRoster(nextRoster: Record<string, PersonnelUser[]>) {
+    const normalized = normalizePersonnelRoster(nextRoster)
+    setPersonnelRoster(normalized)
+    localStorage.setItem(personnelStorageKey, JSON.stringify(normalized))
   }
 
-  function addPersonnel() {
+  function updatePersonnelDraft(person: PersonnelUser, patch: Partial<PersonnelUser>) {
+    const key = person.id || `${person.department}-${person.name}`
+    persistPersonnelRoster({
+      ...personnelRoster,
+      [person.department]: (personnelRoster[person.department] ?? []).map((item) => (item.id || `${item.department}-${item.name}`) === key ? { ...item, ...patch } : item),
+    })
+  }
+
+  async function savePersonnel(person: PersonnelUser) {
+    if (!isOwner) {
+      setMessage('無權限：只有 owner 可以修改人員用戶名、密碼與權限。')
+      return
+    }
+    const clean: PersonnelUser = {
+      ...person,
+      department: person.department || personnelDepartments[0],
+      name: person.name.trim(),
+      username: (person.username || person.name).trim(),
+      password: person.password || '',
+      active: true,
+      sortOrder: person.sortOrder || flattenPersonnelRoster(personnelRoster).length + 1,
+    }
+    if (!clean.name) {
+      setMessage('姓名不可為空。')
+      return
+    }
+    if (supabase && adminProfile) {
+      const query = clean.id
+        ? supabase.from('personnel_users').update(toDbPersonnelUser(clean)).eq('id', clean.id).select('*').single()
+        : supabase.from('personnel_users').insert(toDbPersonnelUser(clean)).select('*').single()
+      const { data, error } = await query
+      if (error) {
+        setMessage(`人員保存失敗：${error.message}`)
+        return
+      }
+      const saved = fromDbPersonnelUser(data)
+      persistPersonnelRoster({ ...personnelRoster, [saved.department]: (personnelRoster[saved.department] ?? []).map((item) => item.id === saved.id || (!item.id && item.name === person.name) ? saved : item) })
+      setMessage(`已保存人員：${saved.name}`)
+      await refreshPersonnelUsers()
+      return
+    }
+    persistPersonnelRoster({ ...personnelRoster, [clean.department]: (personnelRoster[clean.department] ?? []).map((item) => item === person ? clean : item) })
+    setMessage(`已保存人員：${clean.name}`)
+  }
+
+  async function addPersonnel() {
+    if (!isOwner) {
+      setMessage('無權限：只有 owner 可以新增人員。')
+      return
+    }
     const name = newPerson.name.trim()
     if (!name) return
-    const current = personnelRoster[newPerson.department] ?? []
-    const withoutDuplicate = current.filter((item) => item.name !== name)
-    persistPersonnelRoster({ ...personnelRoster, [newPerson.department]: [...withoutDuplicate, { name, role: newPerson.role }] })
-    setNewPerson({ ...newPerson, name: '' })
+    const newUser: PersonnelUser = {
+      department: newPerson.department,
+      name,
+      username: newPerson.username.trim() || name,
+      password: newPerson.password,
+      role: newPerson.role,
+      active: true,
+      sortOrder: flattenPersonnelRoster(personnelRoster).length + 1,
+    }
+    if (supabase && adminProfile) {
+      const { data, error } = await supabase.from('personnel_users').insert(toDbPersonnelUser(newUser)).select('*').single()
+      if (error) {
+        setMessage(`新增人員失敗：${error.message}`)
+        return
+      }
+      const saved = fromDbPersonnelUser(data)
+      persistPersonnelRoster({ ...personnelRoster, [saved.department]: [...(personnelRoster[saved.department] ?? []), saved] })
+    } else {
+      persistPersonnelRoster({ ...personnelRoster, [newUser.department]: [...(personnelRoster[newUser.department] ?? []), newUser] })
+    }
+    setNewPerson({ ...newPerson, name: '', username: '', password: '' })
+    setMessage(`已新增人員：${name}`)
   }
 
-  function updatePersonnelRole(department: string, name: string, role: PersonnelRole) {
-    persistPersonnelRoster({ ...personnelRoster, [department]: (personnelRoster[department] ?? []).map((item) => item.name === name ? { ...item, role } : item) })
-  }
-
-  function removePersonnel(department: string, name: string) {
-    persistPersonnelRoster({ ...personnelRoster, [department]: (personnelRoster[department] ?? []).filter((item) => item.name !== name) })
+  async function removePersonnel(person: PersonnelUser) {
+    if (!isOwner) {
+      setMessage('無權限：只有 owner 可以停用人員。')
+      return
+    }
+    if (!confirm(`確定停用人員「${person.name}」？`)) return
+    if (supabase && adminProfile && person.id) {
+      const { error } = await supabase.from('personnel_users').update({ active: false }).eq('id', person.id)
+      if (error) {
+        setMessage(`停用人員失敗：${error.message}`)
+        return
+      }
+    }
+    persistPersonnelRoster({ ...personnelRoster, [person.department]: (personnelRoster[person.department] ?? []).filter((item) => item !== person) })
+    setMessage(`已停用人員：${person.name}`)
   }
 
   async function handleAdminLogout() {
@@ -470,7 +746,8 @@ function App() {
           onAddRequestSource={addRequestSourceOption}
           onRemoveRequestSource={removeRequestSourceOption}
           onAddPersonnel={addPersonnel}
-          onUpdatePersonnelRole={updatePersonnelRole}
+          onUpdatePersonnelDraft={updatePersonnelDraft}
+          onSavePersonnel={savePersonnel}
           onRemovePersonnel={removePersonnel}
         />
       )}
@@ -516,13 +793,13 @@ type AdminPanelProps = {
   newAdmin: { email: string, password: string, displayName: string, role: AdminRole }
   requestSourceOptions: string[]
   newRequestSource: string
-  personnelRoster: Record<string, Array<{ name: string, role: PersonnelRole }>>
-  newPerson: { department: string, name: string, role: PersonnelRole }
+  personnelRoster: Record<string, PersonnelUser[]>
+  newPerson: { department: string, name: string, username: string, password: string, role: PersonnelRole }
   setAdminEmail: (value: string) => void
   setAdminPassword: (value: string) => void
   setNewAdmin: (value: { email: string, password: string, displayName: string, role: AdminRole }) => void
   setNewRequestSource: (value: string) => void
-  setNewPerson: (value: { department: string, name: string, role: PersonnelRole }) => void
+  setNewPerson: (value: { department: string, name: string, username: string, password: string, role: PersonnelRole }) => void
   onAdminLogin: (event: React.FormEvent) => void
   onAdminLogout: () => void
   onCreateAdmin: (event: React.FormEvent) => void
@@ -535,11 +812,12 @@ type AdminPanelProps = {
   onAddRequestSource: () => void
   onRemoveRequestSource: (value: string) => void
   onAddPersonnel: () => void
-  onUpdatePersonnelRole: (department: string, name: string, role: PersonnelRole) => void
-  onRemovePersonnel: (department: string, name: string) => void
+  onUpdatePersonnelDraft: (person: PersonnelUser, patch: Partial<PersonnelUser>) => void
+  onSavePersonnel: (person: PersonnelUser) => void
+  onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, isAdmin, isOwner, newAdmin, requestSourceOptions, newRequestSource, personnelRoster, newPerson, setAdminEmail, setAdminPassword, setNewAdmin, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onRefreshAdmins, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelRole, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, isAdmin, isOwner, newAdmin, requestSourceOptions, newRequestSource, personnelRoster, newPerson, setAdminEmail, setAdminPassword, setNewAdmin, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onRefreshAdmins, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{isAdmin && <button className="ghost no-print" onClick={onAdminLogout}>登出</button>}</div>
     {!isAdmin ? (
@@ -570,14 +848,16 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filte
 
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Personnel</p><h3>人員與權限管控</h3></div></div>
-          <p className="subtle">採用 PSC 業內資訊管理平台式緊湊排版：按部門分組，人員 chip 內直接修改「操作員 / 管理員」。</p>
-          <div className="personnel-add-row">
+          <p className="subtle">已按你上傳的人員清單替換預設名單。Owner 資訊不在此處變更；只有 Owner 可以修改人員用戶名、密碼、角色或停用人員。</p>
+          {isOwner ? <div className="personnel-add-row">
             <select value={newPerson.department} onChange={(e) => setNewPerson({ ...newPerson, department: e.target.value })}>{personnelDepartments.map((dept) => <option key={dept} value={dept}>{dept}</option>)}</select>
-            <input value={newPerson.name} onChange={(e) => setNewPerson({ ...newPerson, name: e.target.value })} placeholder="姓名" />
+            <input value={newPerson.name} onChange={(e) => setNewPerson({ ...newPerson, name: e.target.value, username: newPerson.username || e.target.value })} placeholder="姓名" />
+            <input value={newPerson.username} onChange={(e) => setNewPerson({ ...newPerson, username: e.target.value })} placeholder="用戶名" />
+            <input type="password" value={newPerson.password} onChange={(e) => setNewPerson({ ...newPerson, password: e.target.value })} placeholder="密碼" />
             <select value={newPerson.role} onChange={(e) => setNewPerson({ ...newPerson, role: e.target.value as PersonnelRole })}><option value="operator">操作員</option><option value="admin">管理員</option></select>
             <button className="primary" type="button" onClick={onAddPersonnel}><UserPlus size={14} />新增人員</button>
-          </div>
-          <div className="personnel-roster-grid">{personnelDepartments.map((dept) => <div key={dept} className="personnel-dept-row"><div className="dept-name"><b>{dept}</b><span>{personnelRoster[dept]?.length ?? 0} 人</span></div><div className="person-chip-wrap">{(personnelRoster[dept] ?? []).map((person) => <span key={`${dept}-${person.name}`} className="person-chip"><b>{person.name}</b><select value={person.role} onChange={(e) => onUpdatePersonnelRole(dept, person.name, e.target.value as PersonnelRole)}><option value="operator">操作員</option><option value="admin">管理員</option></select><button type="button" onClick={() => onRemovePersonnel(dept, person.name)}>×</button></span>)}</div></div>)}</div>
+          </div> : <p className="subtle">你是 Admin，可查看人員名單；用戶名與密碼僅 Owner 可修改。</p>}
+          <div className="personnel-roster-grid">{personnelDepartments.map((dept) => <div key={dept} className="personnel-dept-row"><div className="dept-name"><b>{dept}</b><span>{personnelRoster[dept]?.length ?? 0} 人</span></div><div className="personnel-row-wrap">{(personnelRoster[dept] ?? []).map((person) => <div key={person.id || `${dept}-${person.name}`} className="personnel-user-row"><input value={person.name} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { name: e.target.value })} aria-label={`${person.name} 姓名`} /><input value={person.username} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { username: e.target.value })} aria-label={`${person.name} 用戶名`} />{isOwner ? <input type="password" value={person.password || ''} onChange={(e) => onUpdatePersonnelDraft(person, { password: e.target.value })} placeholder="密碼" aria-label={`${person.name} 密碼`} /> : <span className="password-hidden">密碼僅 Owner 可見</span>}<select value={person.role} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { role: e.target.value as PersonnelRole })}><option value="operator">操作員</option><option value="admin">管理員</option></select>{isOwner && <><button className="ghost" type="button" onClick={() => onSavePersonnel(person)}>保存</button><button className="danger" type="button" onClick={() => onRemovePersonnel(person)}>停用</button></>}</div>)}</div></div>)}</div>
         </section>
 
         <section className="admin-card">

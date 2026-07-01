@@ -74,6 +74,26 @@ export async function saveRequest(request: ChangeRequest): Promise<ChangeRequest
   return clean
 }
 
+export async function updateRequestStatus(id: string, status: ChangeRequest['status'], completionDate?: string): Promise<ChangeRequest> {
+  const updatedAt = nowIso()
+  if (isCloudConfigured && supabase) {
+    const { data, error } = await supabase
+      .from('change_requests')
+      .update({ status, completion_date: completionDate || null, updated_at: updatedAt })
+      .eq('id', id)
+      .select('*')
+      .single()
+    if (error) throw error
+    return fromDbRequest(data)
+  }
+  const existing = await loadRequests()
+  const next = existing.map((item) => item.id === id ? { ...item, status, completionDate: completionDate || undefined, updatedAt } : item)
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(next))
+  const saved = next.find((item) => item.id === id)
+  if (!saved) throw new Error('找不到要更新的需求')
+  return saved
+}
+
 export async function softDeleteRequest(id: string, deletedBy = 'admin'): Promise<void> {
   if (isCloudConfigured && supabase) {
     const { error } = await supabase

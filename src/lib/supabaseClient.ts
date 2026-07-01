@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import type { AdminUser, ChangeRequest } from '../types'
+import type { AdminUser, ChangeRequest, PersonnelUser } from '../types'
 
 function cleanEnvValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
@@ -29,6 +29,34 @@ export function fromDbAdminUser(row: any): AdminUser {
     active: Boolean(row.active),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+export function fromDbPersonnelUser(row: any): PersonnelUser {
+  return {
+    id: row.id,
+    department: row.department,
+    name: row.name,
+    username: row.username || row.name,
+    password: row.password || '',
+    role: row.role || 'operator',
+    active: Boolean(row.active),
+    sortOrder: Number(row.sort_order ?? 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+export function toDbPersonnelUser(user: PersonnelUser) {
+  return {
+    ...(user.id ? { id: user.id } : {}),
+    department: user.department,
+    name: user.name,
+    username: user.username || user.name,
+    password: user.password || null,
+    role: user.role,
+    active: user.active,
+    sort_order: user.sortOrder,
   }
 }
 

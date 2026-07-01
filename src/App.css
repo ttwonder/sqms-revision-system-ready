@@ -147,7 +147,7 @@ tr.overdue td { background: #fff1f2; }
 .source-option-list { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .source-option-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px 4px 10px; border-radius: 999px; background: #f7f1f9; border: 1px solid #eaddeb; color: #4f4358; font-weight: 800; font-size: .82rem; }
 .source-option-chip button, .person-chip button { width: 20px; height: 20px; min-width: 20px; padding: 0; border: 0; border-radius: 50%; background: #fff; color: #8a5260; font-weight: 900; line-height: 1; }
-.personnel-add-row { display: grid; grid-template-columns: 120px minmax(180px, 1fr) 120px auto; gap: 8px; align-items: center; margin: 10px 0 12px; }
+.personnel-add-row { display: grid; grid-template-columns: 120px minmax(140px, 1fr) minmax(140px, 1fr) minmax(120px, 1fr) 110px auto; gap: 8px; align-items: center; margin: 10px 0 12px; }
 .personnel-roster-grid { display: grid; gap: 6px; border-top: 1px solid var(--line); }
 .personnel-dept-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .dept-name { display: grid; gap: 2px; color: #4f4358; }
@@ -156,10 +156,15 @@ tr.overdue td { background: #fff1f2; }
 .person-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 6px 5px 9px; border: 1px solid #eaddeb; border-radius: 999px; background: #fffafd; max-width: 100%; }
 .person-chip b { white-space: nowrap; font-size: .84rem; }
 .person-chip select { width: 86px; min-width: 86px; padding: 4px 22px 4px 7px; border-radius: 999px; font-size: .78rem; font-weight: 800; }
+.personnel-row-wrap { display: grid; gap: 6px; }
+.personnel-user-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) minmax(110px, 1fr) 96px auto auto; gap: 6px; align-items: center; padding: 6px; border: 1px solid #eaddeb; border-radius: 12px; background: #fffafd; }
+.personnel-user-row input, .personnel-user-row select { min-width: 0; padding: 6px 8px; font-size: .82rem; }
+.personnel-user-row input:disabled, .personnel-user-row select:disabled { background: #f8fafc; color: #6b7280; opacity: 1; }
+.password-hidden { color: var(--muted); font-size: .78rem; font-weight: 800; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(63, 59, 79, .32); backdrop-filter: blur(3px); }
 .completion-modal { width: min(420px, 100%); padding: 18px; border-radius: 20px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 @media (max-width: 760px) {
   .chart-grid.three { grid-template-columns: 1fr; }
-  .source-option-form, .personnel-add-row, .personnel-dept-row { grid-template-columns: 1fr; }
+  .source-option-form, .personnel-add-row, .personnel-dept-row, .personnel-user-row { grid-template-columns: 1fr; }
 }
