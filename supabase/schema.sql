@@ -193,6 +193,41 @@ update personnel_users p
 set active = false, updated_at = now()
 where not exists (select 1 from seed s where s.department = p.department and s.name = p.name);
 
+create or replace view public_personnel_users as
+select
+  id,
+  department,
+  name,
+  username,
+  role,
+  active,
+  sort_order,
+  created_at,
+  updated_at,
+  coalesce(nullif(password, ''), '') <> '' as has_password
+from personnel_users
+where active = true;
+
+grant select on public_personnel_users to anon, authenticated;
+
+create or replace function verify_personnel_password(p_personnel_id uuid, p_password text)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from personnel_users
+    where id = p_personnel_id
+      and active = true
+      and coalesce(password, '') = coalesce(p_password, '')
+      and coalesce(password, '') <> ''
+  );
+$$;
+
+grant execute on function verify_personnel_password(uuid, text) to anon, authenticated;
+
 -- 首位 owner：請按需要修改為你的主要管理員 email。
 insert into admin_users (email, display_name, role, active)
 values ('tuotuoworm@outlook.com', 'System Owner', 'owner', true)

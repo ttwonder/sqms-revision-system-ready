@@ -33,15 +33,17 @@ export function fromDbAdminUser(row: any): AdminUser {
 }
 
 export function fromDbPersonnelUser(row: any): PersonnelUser {
+  const password = row.password || ''
   return {
     id: row.id,
     department: row.department,
     name: row.name,
     username: row.username || row.name,
-    password: row.password || '',
+    password,
+    hasPassword: Boolean(row.has_password ?? row.hasPassword ?? password),
     role: row.role || 'operator',
-    active: Boolean(row.active),
-    sortOrder: Number(row.sort_order ?? 0),
+    active: row.active === undefined ? true : Boolean(row.active),
+    sortOrder: Number(row.sort_order ?? row.sortOrder ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

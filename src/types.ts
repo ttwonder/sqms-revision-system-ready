@@ -35,8 +35,9 @@ export interface PersonnelUser {
   name: string
   username: string
   password?: string
+  hasPassword?: boolean
   role: PersonnelRole
-  active: boolean
+  active?: boolean
   sortOrder: number
   createdAt?: string
   updatedAt?: string

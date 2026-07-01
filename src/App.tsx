@@ -158,6 +158,7 @@ const defaultPersonnel: Record<string, PersonnelUser[]> = {
   ],
 }
 const personnelStorageKey = 'sqms-personnel-roster-v2'
+const personnelSessionKey = 'sqms-current-personnel-v1'
 
 function requestMatchesSearch(request: ChangeRequest, query: string) {
   const keyword = query.trim().toLowerCase()
@@ -196,6 +197,7 @@ function normalizePersonnelRoster(value: unknown): Record<string, PersonnelUser[
       name: (person.name || '').trim(),
       username: (person.username || person.name || '').trim(),
       password: person.password || '',
+      hasPassword: Boolean(person.hasPassword ?? person.password),
       role: (person.role === 'admin' ? 'admin' : 'operator') as PersonnelRole,
       active: person.active !== false,
       sortOrder: Number(person.sortOrder ?? index + 1),
@@ -222,6 +224,14 @@ function flattenPersonnelRoster(roster: Record<string, PersonnelUser[]>): Person
   return Object.values(roster).flat()
 }
 
+function personKey(person: PersonnelUser) {
+  return person.id || `${person.department}::${person.username || person.name}`
+}
+
+function publicPersonSession(person: PersonnelUser): PersonnelUser {
+  return { ...person, password: '' }
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('form')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
@@ -242,6 +252,11 @@ function App() {
     try { return normalizePersonnelRoster(JSON.parse(localStorage.getItem(personnelStorageKey) || 'null')) } catch { return normalizePersonnelRoster(defaultPersonnel) }
   })
   const [newPerson, setNewPerson] = useState({ department: personnelDepartments[0], name: '', username: '', password: '', role: 'operator' as PersonnelRole })
+  const [currentPerson, setCurrentPerson] = useState<PersonnelUser | null>(() => {
+    try { return JSON.parse(localStorage.getItem(personnelSessionKey) || 'null') } catch { return null }
+  })
+  const [personnelLoginOpen, setPersonnelLoginOpen] = useState(false)
+  const [personnelLogin, setPersonnelLogin] = useState({ department: personnelDepartments[0], personKey: '', password: '' })
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
 
   async function refresh() {
@@ -309,6 +324,20 @@ function App() {
     setPersonnelRoster(cloudRoster.length ? groupPersonnelUsers(cloudRoster) : normalizePersonnelRoster(defaultPersonnel))
   }
 
+  async function refreshPublicPersonnelUsers() {
+    if (!supabase) return
+    const { data, error } = await supabase
+      .from('public_personnel_users')
+      .select('*')
+      .eq('active', true)
+      .order('sort_order')
+      .order('department')
+      .order('name')
+    if (error) return
+    const cloudRoster = (data ?? []).map(fromDbPersonnelUser)
+    if (cloudRoster.length) setPersonnelRoster(groupPersonnelUsers(cloudRoster))
+  }
+
   async function acceptAdminSession(email: string) {
     const profile = await loadAdminProfile(email)
     if (!profile) {
@@ -341,6 +370,7 @@ function App() {
 
   useEffect(() => {
     refresh()
+    refreshPublicPersonnelUsers()
     if (supabase) {
       supabase.auth.getSession().then(async ({ data }) => {
         const email = data.session?.user.email
@@ -356,6 +386,10 @@ function App() {
 
   const isAdmin = Boolean(adminProfile?.active)
   const isOwner = adminProfile?.role === 'owner'
+  const personnelForLogin = personnelRoster[personnelLogin.department] ?? []
+  const selectedLoginPerson = personnelForLogin.find((person) => personKey(person) === personnelLogin.personKey) ?? personnelForLogin[0]
+  const selectedLoginNeedsPassword = Boolean(selectedLoginPerson?.hasPassword || selectedLoginPerson?.password)
+  const canEditRequests = Boolean(currentPerson || isAdmin)
 
   const filtered = useMemo(() => filterRequests(requests, filters), [requests, filters])
   const searched = useMemo(() => filtered.filter((request) => requestMatchesSearch(request, searchQuery)), [filtered, searchQuery])
@@ -377,8 +411,62 @@ function App() {
     setTab('form')
   }
 
+  async function handlePersonnelLogin(event?: React.FormEvent) {
+    event?.preventDefault()
+    const person = selectedLoginPerson
+    if (!person) {
+      setMessage('請先選擇人員。')
+      return
+    }
+    if (selectedLoginNeedsPassword) {
+      let passed = false
+      if (supabase && person.id) {
+        const { data, error } = await supabase.rpc('verify_personnel_password', { p_personnel_id: person.id, p_password: personnelLogin.password })
+        if (error) {
+          setMessage(`人員登入驗證失敗：${error.message}。請確認 Supabase 已執行最新版 schema.sql。`)
+          return
+        }
+        passed = Boolean(data)
+      } else {
+        passed = personnelLogin.password === person.password
+      }
+      if (!passed) {
+        setMessage('人員密碼錯誤，請重新輸入。')
+        return
+      }
+    }
+    const sessionPerson = publicPersonSession(person)
+    setCurrentPerson(sessionPerson)
+    localStorage.setItem(personnelSessionKey, JSON.stringify(sessionPerson))
+    setPersonnelLoginOpen(false)
+    setPersonnelLogin((current) => ({ ...current, personKey: personKey(person), password: '' }))
+    setMessage(`目前人員：${person.department} / ${person.name}`)
+  }
+
+  function logoutPersonnel() {
+    setCurrentPerson(null)
+    localStorage.removeItem(personnelSessionKey)
+    setMessage('已退出目前人員身份。')
+  }
+
+  function openPersonnelLogin() {
+    refreshPublicPersonnelUsers()
+    setPersonnelLogin((current) => {
+      const department = currentPerson?.department || current.department || personnelDepartments[0]
+      const people = personnelRoster[department] ?? []
+      const target = currentPerson ? people.find((person) => person.name === currentPerson.name || person.username === currentPerson.username) : people[0]
+      return { department, personKey: target ? personKey(target) : '', password: '' }
+    })
+    setPersonnelLoginOpen(true)
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (editingId && !canEditRequests) {
+      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+      openPersonnelLogin()
+      return
+    }
     if (!form.applicantName.trim() || !form.topicCode || !form.suggestedChange.trim() || !form.changeReason.trim() || !form.targetDueDate) {
       setMessage('請填寫申請人、第一層主題、建議內容、修改理由與期望完成日期。')
       return
@@ -399,6 +487,11 @@ function App() {
   }
 
   function startEdit(request: ChangeRequest) {
+    if (!canEditRequests) {
+      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+      openPersonnelLogin()
+      return
+    }
     setEditingId(request.id)
     setForm({ ...request })
     setTab('form')
@@ -415,6 +508,12 @@ function App() {
   }
 
   async function completeRequest(request: ChangeRequest, completionDate: string) {
+    if (!canEditRequests) {
+      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+      setCompletingRequest(null)
+      openPersonnelLogin()
+      return
+    }
     try {
       const saved = await updateRequestStatus(request.id, 'completed', completionDate)
       setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
@@ -426,6 +525,11 @@ function App() {
   }
 
   async function reopenRequest(request: ChangeRequest) {
+    if (!canEditRequests) {
+      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+      openPersonnelLogin()
+      return
+    }
     try {
       const saved = await updateRequestStatus(request.id, 'processing')
       setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
@@ -660,6 +764,18 @@ function App() {
         <div className="cloud-pill">{isCloudConfigured ? 'Supabase 雲端已配置' : '本機展示模式：待配置 Supabase'}</div>
       </header>
 
+      <section className="identity-strip no-print" aria-label="目前人員身份">
+        <div>
+          <p className="eyebrow">Current User</p>
+          {currentPerson ? <strong>{currentPerson.department} / {currentPerson.name}</strong> : <strong>未登入人員</strong>}
+          <span className="subtle">未登入仍可新增提交；修改、結案或再次修改已立案內容需先登入人員。</span>
+        </div>
+        <div className="identity-actions">
+          <button className="primary" type="button" onClick={openPersonnelLogin}>人員登入 / 切換</button>
+          {currentPerson && <button className="ghost" type="button" onClick={logoutPersonnel}>退出身份</button>}
+        </div>
+      </section>
+
       <nav className="nav-tabs no-print" aria-label="主功能">
         <button className={tab === 'form' ? 'active' : ''} onClick={() => setTab('form')}><PlusCircle size={16} /> 新增/修改</button>
         <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}><LayoutDashboard size={16} /> Dashboard</button>
@@ -711,7 +827,7 @@ function App() {
         <section className="panel">
           <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
           <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} />
-          <RequestTable requests={listForActiveTab} isAdmin={isAdmin} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} />
+          <RequestTable requests={listForActiveTab} isAdmin={isAdmin} canEditRequests={canEditRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} />
         </section>
       )}
 
@@ -722,6 +838,7 @@ function App() {
           adminProfile={adminProfile}
           adminUsers={adminUsers}
           filteredRequests={filtered}
+          canEditRequests={canEditRequests}
           isAdmin={isAdmin}
           isOwner={isOwner}
           newAdmin={newAdmin}
@@ -751,6 +868,15 @@ function App() {
           onRemovePersonnel={removePersonnel}
         />
       )}
+      {personnelLoginOpen && <PersonnelLoginModal
+        roster={personnelRoster}
+        login={personnelLogin}
+        selectedPerson={selectedLoginPerson}
+        needsPassword={selectedLoginNeedsPassword}
+        setLogin={setPersonnelLogin}
+        onCancel={() => setPersonnelLoginOpen(false)}
+        onConfirm={handlePersonnelLogin}
+      />}
       {completingRequest && <CompletionDateModal request={completingRequest} onCancel={() => setCompletingRequest(null)} onConfirm={(date) => completeRequest(completingRequest, date)} />}
     </div>
   )
@@ -788,6 +914,7 @@ type AdminPanelProps = {
   adminProfile: AdminUser | null
   adminUsers: AdminUser[]
   filteredRequests: ChangeRequest[]
+  canEditRequests: boolean
   isAdmin: boolean
   isOwner: boolean
   newAdmin: { email: string, password: string, displayName: string, role: AdminRole }
@@ -817,7 +944,7 @@ type AdminPanelProps = {
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, isAdmin, isOwner, newAdmin, requestSourceOptions, newRequestSource, personnelRoster, newPerson, setAdminEmail, setAdminPassword, setNewAdmin, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onRefreshAdmins, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filteredRequests, canEditRequests, isAdmin, isOwner, newAdmin, requestSourceOptions, newRequestSource, personnelRoster, newPerson, setAdminEmail, setAdminPassword, setNewAdmin, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onCreateAdmin, onDeactivateAdmin, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onRefreshAdmins, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{isAdmin && <button className="ghost no-print" onClick={onAdminLogout}>登出</button>}</div>
     {!isAdmin ? (
@@ -884,13 +1011,33 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, adminUsers, filte
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Requests</p><h3>需求刪除管理</h3></div></div>
           <p className="subtle">刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p>
-          <RequestTable requests={filteredRequests} isAdmin={isAdmin} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} />
+          <RequestTable requests={filteredRequests} isAdmin={isAdmin} canEditRequests={canEditRequests} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} />
         </section>
       </div>
     )}
   </section>
 }
 
+
+function PersonnelLoginModal({ roster, login, selectedPerson, needsPassword, setLogin, onCancel, onConfirm }: { roster: Record<string, PersonnelUser[]>, login: { department: string, personKey: string, password: string }, selectedPerson?: PersonnelUser, needsPassword: boolean, setLogin: (value: { department: string, personKey: string, password: string }) => void, onCancel: () => void, onConfirm: (event?: React.FormEvent) => void }) {
+  const people = roster[login.department] ?? []
+  const changeDepartment = (department: string) => {
+    const first = roster[department]?.[0]
+    setLogin({ department, personKey: first ? personKey(first) : '', password: '' })
+  }
+  return <div className="modal-backdrop no-print" role="dialog" aria-modal="true" aria-label="人員登入或切換">
+    <section className="identity-modal">
+      <p className="eyebrow">Personnel Login</p>
+      <h3>人員登入 / 更換人員</h3>
+      <form onSubmit={onConfirm} className="identity-login-form">
+        <label>部門<select value={login.department} onChange={(e) => changeDepartment(e.target.value)}>{personnelDepartments.map((dept) => <option key={dept} value={dept}>{dept}</option>)}</select></label>
+        <label>人員<select value={selectedPerson ? personKey(selectedPerson) : login.personKey} onChange={(e) => setLogin({ ...login, personKey: e.target.value, password: '' })}>{people.map((person) => <option key={personKey(person)} value={personKey(person)}>{person.name}（{person.username || person.name}）</option>)}</select></label>
+        {needsPassword ? <label>密碼<input type="password" value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} placeholder="此人員已設定密碼，請輸入密碼" autoFocus /></label> : <p className="login-help">此人員尚未設定密碼，可直接登入。</p>}
+        <div className="modal-actions"><button className="ghost" type="button" onClick={onCancel}>取消</button><button className="primary" type="submit">確認登入</button></div>
+      </form>
+    </section>
+  </div>
+}
 
 function CompletionDateModal({ request, onCancel, onConfirm }: { request: ChangeRequest, onCancel: () => void, onConfirm: (date: string) => void }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
@@ -976,7 +1123,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
   </div>
 }
 
-function RequestTable({ requests, isAdmin, onEdit, onDelete, onComplete, onReopen }: { requests: ChangeRequest[], isAdmin: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void }) {
+function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, onComplete, onReopen }: { requests: ChangeRequest[], isAdmin: boolean, canEditRequests: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void }) {
   const sorted = [...requests].sort((a, b) => {
     const overdueDiff = Number(isOverdue(b)) - Number(isOverdue(a))
     if (overdueDiff) return overdueDiff
@@ -984,7 +1131,7 @@ function RequestTable({ requests, isAdmin, onEdit, onDelete, onComplete, onReope
   })
   return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr><th>狀態</th><th>急迫度</th><th>編號</th><th>來源</th><th>歸屬</th><th>建議內容</th><th>期望日</th><th>申請人</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
     const completed = request.status === 'completed'
-    return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span>{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
+    return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span>{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{request.applicantName}</td><td className="actions no-print">{canEditRequests ? <><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}</> : <span className="action-hint">登入後可修改</span>}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
   })}</tbody></table></div>
 }
 export default App
