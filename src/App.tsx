@@ -255,6 +255,7 @@ function App() {
   })
   const [personnelLoginOpen, setPersonnelLoginOpen] = useState(false)
   const [personnelLogin, setPersonnelLogin] = useState({ department: personnelDepartments[0], personKey: '', password: '' })
+  const [personnelDirty, setPersonnelDirty] = useState(false)
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
 
   async function refresh() {
@@ -306,6 +307,7 @@ function App() {
     }
     const cloudRoster = (data ?? []).map(fromDbPersonnelUser)
     setPersonnelRoster(cloudRoster.length ? groupPersonnelUsers(cloudRoster) : normalizePersonnelRoster(defaultPersonnel))
+    setPersonnelDirty(false)
   }
 
   async function refreshPublicPersonnelUsers() {
@@ -566,6 +568,50 @@ function App() {
       ...personnelRoster,
       [person.department]: (personnelRoster[person.department] ?? []).map((item) => (item.id || `${item.department}-${item.name}`) === key ? { ...item, ...patch } : item),
     })
+    setPersonnelDirty(true)
+  }
+
+  function cleanPersonnelForSave(person: PersonnelUser, index: number): PersonnelUser {
+    return {
+      ...person,
+      department: person.department || personnelDepartments[0],
+      name: person.name.trim(),
+      username: (person.username || person.name).trim(),
+      password: person.password || '',
+      active: person.active === undefined ? true : person.active,
+      sortOrder: person.sortOrder || index + 1,
+    }
+  }
+
+  async function saveAllPersonnel() {
+    if (!isOwner) {
+      setMessage('無權限：只有 owner 可以保存全部人員修改。')
+      return
+    }
+    const people = flattenPersonnelRoster(personnelRoster).map(cleanPersonnelForSave)
+    if (people.some((person) => !person.name)) {
+      setMessage('保存失敗：人員姓名不可為空。')
+      return
+    }
+    try {
+      if (supabase && adminProfile) {
+        for (const person of people) {
+          const query = person.id
+            ? supabase.from('personnel_users').update(toDbPersonnelUser(person)).eq('id', person.id).select('id').single()
+            : supabase.from('personnel_users').insert(toDbPersonnelUser(person)).select('id').single()
+          const { error } = await query
+          if (error) throw error
+        }
+        await refreshPersonnelUsers()
+        setMessage(`已保存全部人員修改到雲端，共 ${people.length} 人。`)
+      } else {
+        persistPersonnelRoster(groupPersonnelUsers(people))
+        setPersonnelDirty(false)
+        setMessage(`已保存全部人員修改，共 ${people.length} 人。`)
+      }
+    } catch (error) {
+      setMessage(`人員修改保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。請確認已使用 Owner 登入，且 Supabase 已執行最新版 schema.sql。`)
+    }
   }
 
   async function savePersonnel(person: PersonnelUser) {
@@ -787,6 +833,7 @@ function App() {
           requestSourceOptions={requestSourceOptions}
           newRequestSource={newRequestSource}
           personnelRoster={personnelRoster}
+          personnelDirty={personnelDirty}
           newPerson={newPerson}
           setAdminEmail={setAdminEmail}
           setAdminPassword={setAdminPassword}
@@ -802,6 +849,7 @@ function App() {
           onRemoveRequestSource={removeRequestSourceOption}
           onAddPersonnel={addPersonnel}
           onUpdatePersonnelDraft={updatePersonnelDraft}
+          onSaveAllPersonnel={saveAllPersonnel}
           onSavePersonnel={savePersonnel}
           onRemovePersonnel={removePersonnel}
         />
@@ -859,6 +907,7 @@ type AdminPanelProps = {
   requestSourceOptions: string[]
   newRequestSource: string
   personnelRoster: Record<string, PersonnelUser[]>
+  personnelDirty: boolean
   newPerson: { department: string, name: string, username: string, password: string, role: PersonnelRole }
   setAdminEmail: (value: string) => void
   setAdminPassword: (value: string) => void
@@ -874,11 +923,12 @@ type AdminPanelProps = {
   onRemoveRequestSource: (value: string) => void
   onAddPersonnel: () => void
   onUpdatePersonnelDraft: (person: PersonnelUser, patch: Partial<PersonnelUser>) => void
+  onSaveAllPersonnel: () => void
   onSavePersonnel: (person: PersonnelUser) => void
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, canEditRequests, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, canEditRequests, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   const managerLabel = adminProfile ? `${adminProfile.email}（${adminProfile.role === 'owner' ? 'Owner' : 'Admin'}）` : currentPerson ? `${currentPerson.department} / ${currentPerson.name}（管理員）` : ''
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{adminProfile && <button className="ghost no-print" onClick={onAdminLogout}>登出 Owner</button>}</div>
@@ -910,7 +960,8 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, fi
 
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Personnel</p><h3>人員與權限管控</h3></div></div>
-          <p className="subtle">已按你上傳的人員清單替換預設名單。Owner 資訊不在此處變更；只有 Owner 可以修改人員用戶名、密碼、角色或停用人員。</p>
+          <p className="subtle">已按你上傳的人員清單替換預設名單。Owner 資訊不在此處變更；只有 Owner 可以修改人員用戶名、密碼、角色或停用人員。修改後請點「保存全部人員修改到雲端」。</p>
+          {isOwner && <div className="personnel-save-bar"><button className="primary" type="button" onClick={onSaveAllPersonnel}>{personnelDirty ? '保存全部人員修改到雲端（有未保存變更）' : '保存全部人員修改到雲端'}</button><span className={personnelDirty ? 'save-warning' : 'subtle'}>{personnelDirty ? '有未保存修改，刷新前請先保存。' : '目前沒有未保存的人員修改。'}</span></div>}
           {isOwner ? <div className="personnel-add-row">
             <select value={newPerson.department} onChange={(e) => setNewPerson({ ...newPerson, department: e.target.value })}>{personnelDepartments.map((dept) => <option key={dept} value={dept}>{dept}</option>)}</select>
             <input value={newPerson.name} onChange={(e) => setNewPerson({ ...newPerson, name: e.target.value, username: newPerson.username || e.target.value })} placeholder="姓名" />

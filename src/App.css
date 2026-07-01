@@ -152,6 +152,8 @@ tr.overdue td { background: #fff1f2; }
 .source-option-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px 4px 10px; border-radius: 999px; background: #f7f1f9; border: 1px solid #eaddeb; color: #4f4358; font-weight: 800; font-size: .82rem; }
 .source-option-chip button, .person-chip button { width: 20px; height: 20px; min-width: 20px; padding: 0; border: 0; border-radius: 50%; background: #fff; color: #8a5260; font-weight: 900; line-height: 1; }
 .personnel-add-row { display: grid; grid-template-columns: 120px minmax(140px, 1fr) minmax(140px, 1fr) minmax(120px, 1fr) 110px auto; gap: 8px; align-items: center; margin: 10px 0 12px; }
+.personnel-save-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0; padding: 10px; border: 1px solid #d8ece5; border-radius: 14px; background: #f4fbf8; }
+.save-warning { color: #9a5b00; font-weight: 900; }
 .personnel-roster-grid { display: grid; gap: 6px; border-top: 1px solid var(--line); }
 .personnel-dept-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .dept-name { display: grid; gap: 2px; color: #4f4358; }
