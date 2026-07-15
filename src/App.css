@@ -86,6 +86,7 @@ td b, td small { display: block; }
 td small { color: var(--muted); margin-top: 4px; line-height: 1.35; }
 .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #e8f7f1; color: #277056; font-weight: 900; font-size: .72rem; margin-bottom: 3px; }
 .status { display: inline-block; border-radius: 999px; padding: 4px 8px; font-weight: 900; white-space: nowrap; }
+.status-select { min-width: 92px; padding: 5px 8px; border-radius: 999px; font-size: .78rem; font-weight: 900; background: #f7f1f9; color: #675070; }
 .status.new { background: #e0f2fe; color: #0369a1; } .status.processing { background: #fef3c7; color: #92400e; } .status.completed { background: #dcfce7; color: #166534; } .status.cancelled { background: #f1f5f9; color: #475569; }
 tr.overdue td { background: #fff1f2; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }

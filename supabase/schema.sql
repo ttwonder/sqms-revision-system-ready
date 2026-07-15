@@ -14,7 +14,7 @@ create table if not exists change_requests (
   scope_note text,
   suggested_change text not null,
   change_reason text not null,
-  target_due_date date not null,
+  target_due_date date,
   urgency text not null check (urgency in ('urgent','high','medium','low')) default 'medium',
   need_related_form_update boolean not null default false,
   reference_materials text,
@@ -29,6 +29,7 @@ create table if not exists change_requests (
 );
 
 alter table change_requests add column if not exists request_source text not null default '外部檢查';
+alter table change_requests alter column target_due_date drop not null;
 
 create index if not exists idx_change_requests_created_at on change_requests(created_at);
 create index if not exists idx_change_requests_source on change_requests(request_source);
@@ -225,7 +226,7 @@ security definer
 set search_path = public
 as $$
 declare
-  prefix text := 'SQMS-' || to_char(p_on_date, 'YYYYMM') || '-';
+  prefix text := 'SQMS-' || to_char(p_on_date, 'YYYYMMDD') || '-';
   pattern text := '^' || prefix || '([0-9]+)$';
   next_seq integer;
 begin
@@ -234,7 +235,7 @@ begin
   from change_requests
   where request_no ~ pattern;
 
-  return prefix || lpad(next_seq::text, 3, '0');
+  return prefix || lpad(next_seq::text, 2, '0');
 end;
 $$;
 

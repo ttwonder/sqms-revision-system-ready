@@ -232,7 +232,7 @@ function publicPersonSession(person: PersonnelUser): PersonnelUser {
   return { ...person, password: '' }
 }
 
-type RequiredField = 'requestSource' | 'applicantName' | 'categoryCode' | 'topicCode' | 'targetDueDate' | 'suggestedChange' | 'changeReason'
+type RequiredField = 'requestSource' | 'applicantName' | 'suggestedChange' | 'changeReason'
 
 function App() {
   const [tab, setTab] = useState<Tab>('form')
@@ -487,9 +487,6 @@ function App() {
     const requiredMissing: RequiredField[] = []
     if (!form.requestSource) requiredMissing.push('requestSource')
     if (!form.applicantName.trim()) requiredMissing.push('applicantName')
-    if (!form.categoryCode) requiredMissing.push('categoryCode')
-    if (!form.topicCode) requiredMissing.push('topicCode')
-    if (!form.targetDueDate) requiredMissing.push('targetDueDate')
     if (!form.suggestedChange.trim()) requiredMissing.push('suggestedChange')
     if (!form.changeReason.trim()) requiredMissing.push('changeReason')
     if (requiredMissing.length) {
@@ -574,6 +571,25 @@ function App() {
       setMessage(`已將 ${saved.requestNo} 轉回待完成。`)
     } catch (error) {
       setMessage(`轉回待完成失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    }
+  }
+
+  async function changeRequestStatus(request: ChangeRequest, status: RequestStatus) {
+    if (!canEditRequests) {
+      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+      openPersonnelLogin()
+      return
+    }
+    if (status === 'completed') {
+      setCompletingRequest(request)
+      return
+    }
+    try {
+      const saved = await updateRequestStatus(request.id, status)
+      setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setMessage(`已更新 ${saved.requestNo} 狀態為「${statusLabels[status]}」。`)
+    } catch (error) {
+      setMessage(`狀態更新失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
     }
   }
 
@@ -843,17 +859,15 @@ function App() {
             <label>需求編號<input value={form.requestNo} onChange={(e) => updateForm('requestNo', e.target.value)} /></label>
             <label>需求來源 *<select className={fieldError('requestSource')} value={form.requestSource} onChange={(e) => updateForm('requestSource', e.target.value)}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
             <label>申請人 *<input className={fieldError('applicantName')} value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
-            <label>大類 *<select className={fieldError('categoryCode')} value={form.categoryCode} onChange={(e) => {
+            <label>大類<select value={form.categoryCode} onChange={(e) => {
               const categoryCode = e.target.value
               const firstTopic = getTopicOptions(categoryCode)[0]
               setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: '' }))
-              setMissingFields((current) => current.filter((field) => field !== 'categoryCode' && field !== 'topicCode'))
             }}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
-            <label>第一層主題 *<select className={fieldError('topicCode')} value={form.topicCode} onChange={(e) => { setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' })); setMissingFields((current) => current.filter((field) => field !== 'topicCode')) }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
+            <label>第一層主題<select value={form.topicCode} onChange={(e) => setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' }))}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
             <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item) => <option key={item.code} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
-            <label>期望完成日期 *<input className={fieldError('targetDueDate')} type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
+            <label>期望完成日期<input type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
             <label>急迫度<select value={form.urgency} onChange={(e) => updateForm('urgency', e.target.value as Urgency)}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label>狀態<select value={form.status} onChange={(e) => updateForm('status', e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="wide">修改內容歸屬補充<input value={form.scopeNote ?? ''} onChange={(e) => updateForm('scopeNote', e.target.value)} placeholder="例如：某段落、某表格、某流程" /></label>
             <label className="wide">需改的建議內容或方向 *<textarea className={fieldError('suggestedChange')} value={form.suggestedChange} onChange={(e) => updateForm('suggestedChange', e.target.value)} rows={4} /></label>
             <label className="wide">需要修改的理由或依據 *<textarea className={fieldError('changeReason')} value={form.changeReason} onChange={(e) => updateForm('changeReason', e.target.value)} rows={3} /></label>
@@ -870,7 +884,7 @@ function App() {
         <section className="panel">
           <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
           <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} />
-          <RequestTable requests={listForActiveTab} isAdmin={canManagePage} canEditRequests={canEditRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} />
+          <RequestTable requests={listForActiveTab} isAdmin={canManagePage} canEditRequests={canEditRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
         </section>
       )}
 
@@ -900,6 +914,7 @@ function App() {
           onDeleteRequest={handleDelete}
           onCompleteRequest={setCompletingRequest}
           onReopenRequest={reopenRequest}
+          onChangeRequestStatus={changeRequestStatus}
           onAddRequestSource={addRequestSourceOption}
           onRemoveRequestSource={removeRequestSourceOption}
           onAddPersonnel={addPersonnel}
@@ -974,6 +989,7 @@ type AdminPanelProps = {
   onDeleteRequest: (request: ChangeRequest) => void
   onCompleteRequest: (request: ChangeRequest) => void
   onReopenRequest: (request: ChangeRequest) => void
+  onChangeRequestStatus: (request: ChangeRequest, status: RequestStatus) => void
   onAddRequestSource: () => void
   onRemoveRequestSource: (value: string) => void
   onAddPersonnel: () => void
@@ -983,7 +999,7 @@ type AdminPanelProps = {
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, canEditRequests, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, canEditRequests, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onChangeRequestStatus, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   const managerLabel = adminProfile ? `${adminProfile.email}（${adminProfile.role === 'owner' ? 'Owner' : 'Admin'}）` : currentPerson ? `${currentPerson.department} / ${currentPerson.name}（管理員）` : ''
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{adminProfile && <button className="ghost no-print" onClick={onAdminLogout}>登出 Owner</button>}</div>
@@ -1031,7 +1047,7 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, fi
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Requests</p><h3>需求刪除管理</h3></div></div>
           <p className="subtle">刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p>
-          <RequestTable requests={filteredRequests} isAdmin={isAdmin} canEditRequests={canEditRequests} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} />
+          <RequestTable requests={filteredRequests} isAdmin={isAdmin} canEditRequests={canEditRequests} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} onStatusChange={onChangeRequestStatus} />
         </section>
       </div>
     )}
@@ -1143,7 +1159,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
   </div>
 }
 
-function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, onComplete, onReopen }: { requests: ChangeRequest[], isAdmin: boolean, canEditRequests: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void }) {
+function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], isAdmin: boolean, canEditRequests: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
   const sorted = [...requests].sort((a, b) => {
     const overdueDiff = Number(isOverdue(b)) - Number(isOverdue(a))
     if (overdueDiff) return overdueDiff
@@ -1151,7 +1167,7 @@ function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, on
   })
   return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr><th>狀態</th><th>急迫度</th><th>編號</th><th>來源</th><th>歸屬</th><th>建議內容</th><th>期望日</th><th>申請人</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
     const completed = request.status === 'completed'
-    return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td><span className={`status ${request.status}`}>{statusLabels[request.status]}</span>{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate}</td><td>{request.applicantName}</td><td className="actions no-print">{canEditRequests ? <><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}</> : <span className="action-hint">登入後可修改</span>}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
+    return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td>{canEditRequests ? <select className="status-select" value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small></td><td>{request.targetDueDate || '—'}</td><td>{request.applicantName}</td><td className="actions no-print">{canEditRequests ? <><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}</> : <span className="action-hint">登入後可修改</span>}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
   })}</tbody></table></div>
 }
 export default App
