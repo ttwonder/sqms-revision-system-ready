@@ -437,7 +437,10 @@ function App() {
       if (supabase && person.id) {
         const { data, error } = await supabase.rpc('verify_personnel_password', { p_personnel_id: person.id, p_password: personnelLogin.password })
         if (error) {
-          setMessage(`人員登入驗證失敗：${error.message}。請確認 Supabase 已執行最新版 schema.sql。`)
+          const fetchHint = error.message.includes('Failed to fetch')
+            ? '目前無法連接 Supabase，請檢查 GitHub Actions Secret 裡的 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 是否正確，或 Supabase 專案是否已暫停/刪除。'
+            : '請確認 Supabase 已執行最新版 schema.sql。'
+          setMessage(`人員登入驗證失敗：${error.message}。${fetchHint}`)
           return
         }
         passed = Boolean(data)
