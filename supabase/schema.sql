@@ -18,6 +18,7 @@ create table if not exists change_requests (
   urgency text not null check (urgency in ('urgent','high','medium','low')) default 'medium',
   need_related_form_update boolean not null default false,
   reference_materials text,
+  remarks text,
   status text not null check (status in ('new','processing','completed','cancelled')) default 'new',
   completion_date date,
   public_edit_note text,
@@ -29,6 +30,7 @@ create table if not exists change_requests (
 );
 
 alter table change_requests add column if not exists request_source text not null default '外部檢查';
+alter table change_requests add column if not exists remarks text;
 alter table change_requests alter column target_due_date drop not null;
 
 create index if not exists idx_change_requests_created_at on change_requests(created_at);

@@ -46,6 +46,7 @@ export function rowsForExport(requests: ChangeRequest[]) {
     狀態: statusLabels[request.status],
     完成日期: request.completionDate ?? '',
     參考資料: request.referenceMaterials ?? '',
+    備註: request.remarks ?? '',
     建立時間: request.createdAt.slice(0, 10),
     更新時間: request.updatedAt.slice(0, 10),
   }))

@@ -68,6 +68,7 @@ export interface ChangeRequest {
   urgency: Urgency
   needRelatedFormUpdate: boolean
   referenceMaterials?: string
+  remarks?: string
   status: RequestStatus
   completionDate?: string
   publicEditNote?: string

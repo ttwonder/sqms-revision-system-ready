@@ -84,6 +84,7 @@ th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: le
 th { background: #fbf5fc; color: #6e5476; position: sticky; top: 0; z-index: 1; }
 td b, td small { display: block; }
 td small { color: var(--muted); margin-top: 4px; line-height: 1.35; }
+.request-remarks { color: #7c3aed; background: #f5f3ff; border-radius: 8px; padding: 4px 6px; }
 .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #e8f7f1; color: #277056; font-weight: 900; font-size: .72rem; margin-bottom: 3px; }
 .status { display: inline-block; border-radius: 999px; padding: 4px 8px; font-weight: 900; white-space: nowrap; }
 .status-select { min-width: 92px; padding: 5px 8px; border-radius: 999px; font-size: .78rem; font-weight: 900; background: #f7f1f9; color: #675070; }

@@ -9,7 +9,7 @@ function nowIso() {
 }
 
 function normalizeLoadedRequest(request: ChangeRequest): ChangeRequest {
-  return { ...request, requestSource: request.requestSource || DEFAULT_REQUEST_SOURCES[0] }
+  return { ...request, requestSource: request.requestSource || DEFAULT_REQUEST_SOURCES[0], remarks: request.remarks || '' }
 }
 
 export function makeRequestNo(sequence: number, date = new Date()) {
@@ -36,6 +36,7 @@ export function createBlankRequest(sequence: number): ChangeRequest {
     urgency: 'medium',
     needRelatedFormUpdate: false,
     referenceMaterials: '',
+    remarks: '',
     status: 'new',
     createdAt: now,
     updatedAt: now,
