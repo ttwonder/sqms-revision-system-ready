@@ -112,6 +112,7 @@ export function fromDbRequest(row: any): ChangeRequest {
     publicEditNote: row.public_edit_note || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    revision: Number(row.revision ?? 1),
     isDeleted: Boolean(row.is_deleted),
     deletedAt: row.deleted_at || undefined,
     deletedBy: row.deleted_by || undefined,

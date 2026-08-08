@@ -8,7 +8,11 @@ import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatal
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
 import { createBlankRequest, getNextRequestNo, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
-import { DEFAULT_REQUEST_SOURCES, loadRequestSourceOptions, normalizeRequestSources, saveRequestSourceOptions } from './lib/requestSources'
+import { buildRequestPatch, reconcileRequestWithPendingPatch } from './lib/collaboration'
+import { claimPersonnelSession, ensureCloudSession, releasePersonnelSession, restorePersonnelSession } from './lib/cloudSession'
+import { DEFAULT_REQUEST_SOURCES, loadRequestSourceOptions } from './lib/requestSources'
+import { addSharedRequestSource, loadSharedRequestSources, removeSharedRequestSource } from './lib/sharedRequestSources'
+import { clearRequestDraft, loadRequestDraft, saveRequestDraft } from './lib/requestDraft'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
 import { fromDbAdminUser, fromDbPersonnelUser, isCloudConfigured, supabase } from './lib/supabaseClient'
 
@@ -241,6 +245,8 @@ function App() {
   const [form, setForm] = useState<ChangeRequest>(() => createBlankRequest(1))
   const [missingFields, setMissingFields] = useState<RequiredField[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingBaseRequest, setEditingBaseRequest] = useState<ChangeRequest | null>(null)
+  const [editingStartedRevision, setEditingStartedRevision] = useState<number | null>(null)
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const [searchQuery, setSearchQuery] = useState('')
   const [message, setMessage] = useState('')
@@ -255,22 +261,24 @@ function App() {
   })
   const [newPerson, setNewPerson] = useState({ department: personnelDepartments[0], name: '', username: '', password: '', role: 'operator' as PersonnelRole })
   const [currentPerson, setCurrentPerson] = useState<PersonnelUser | null>(() => {
+    if (isCloudConfigured) return null
     try { return JSON.parse(localStorage.getItem(personnelSessionKey) || 'null') } catch { return null }
   })
   const [personnelLoginOpen, setPersonnelLoginOpen] = useState(false)
   const [personnelLogin, setPersonnelLogin] = useState({ department: personnelDepartments[0], personKey: '', password: '' })
   const [personnelDirty, setPersonnelDirty] = useState(false)
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
+  const [draftRestored, setDraftRestored] = useState(false)
 
-  async function refresh() {
-    setLoading(true)
+  async function refresh(showLoading = true) {
+    if (showLoading) setLoading(true)
     try {
       const data = await loadRequests()
       setRequests(data)
     } catch (error) {
       setMessage(`讀取失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }
 
@@ -294,7 +302,7 @@ function App() {
   async function refreshPersonnelUsers() {
     if (!supabase || !adminProfile) return
     const { data, error } = await supabase
-      .from('personnel_users')
+      .from('public_personnel_users')
       .select('*')
       .eq('active', true)
       .order('sort_order')
@@ -328,6 +336,15 @@ function App() {
     if (cloudRoster.length) setPersonnelRoster(groupPersonnelUsers(cloudRoster))
   }
 
+  async function refreshRequestSources() {
+    try {
+      const options = await loadSharedRequestSources()
+      setRequestSourceOptions(options)
+    } catch (error) {
+      setMessage(`需求來源讀取失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    }
+  }
+
   async function acceptAdminSession(email: string) {
     const profile = await loadAdminProfile(email)
     if (!profile) {
@@ -338,7 +355,7 @@ function App() {
     setAdminProfile(profile)
     setAdminEmail(profile.email)
     const { data: personnelRows, error: personnelError } = await supabase
-      ?.from('personnel_users')
+      ?.from('public_personnel_users')
       .select('*')
       .eq('active', true)
       .order('sort_order')
@@ -352,34 +369,100 @@ function App() {
   }
 
   useEffect(() => {
-    refresh()
-    refreshPublicPersonnelUsers()
+    const draft = loadRequestDraft(localStorage)
+    if (draft) {
+      setForm(draft.form)
+      setEditingId(draft.editingId)
+      setEditingBaseRequest(draft.editingBaseRequest)
+      setEditingStartedRevision(draft.editingStartedRevision)
+      setMessage('已恢復上次尚未送出的草稿。')
+    }
+    setDraftRestored(true)
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    void refreshPublicPersonnelUsers()
+    void refreshRequestSources()
     getNextRequestNo().then((requestNo) => {
-      setForm((current) => ({ ...current, requestNo }))
+      setForm((current) => current.revision > 0 ? current : { ...current, requestNo })
     }).catch(() => undefined)
     let autoSyncTimer: number | undefined
     let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined
+    const revalidate = () => { void refresh(false) }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') revalidate()
+    }
     if (supabase) {
-      supabase.auth.getSession().then(async ({ data }) => {
-        const email = data.session?.user.email
-        if (!email) return
-        try {
-          await acceptAdminSession(email)
-        } catch {
-          // 非管理員歷史登入狀態直接清理，不打擾普通填寫流程。
+      ensureCloudSession(supabase).then(async (session) => {
+        const email = session.user.email
+        if (email) {
+          try {
+            await acceptAdminSession(email)
+          } catch {
+            // 非管理員帳號不影響一般人員流程。
+          }
         }
+        try {
+          setCurrentPerson(await restorePersonnelSession(supabase!))
+        } catch (error) {
+          setMessage(`人員身份恢復失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+        }
+      }).catch((error) => {
+        setMessage(error instanceof Error ? error.message : '多人協作工作階段建立失敗。')
       })
       channel = supabase
         .channel('sqms-change-requests-auto-sync')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'change_requests' }, () => refresh())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'change_requests' }, revalidate)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'request_sources' }, () => { void refreshRequestSources() })
         .subscribe()
-      autoSyncTimer = window.setInterval(() => refresh(), 30000)
+      autoSyncTimer = window.setInterval(revalidate, 120000)
+      window.addEventListener('online', revalidate)
+      document.addEventListener('visibilitychange', handleVisibility)
     }
     return () => {
       if (autoSyncTimer) window.clearInterval(autoSyncTimer)
       if (channel && supabase) supabase.removeChannel(channel)
+      window.removeEventListener('online', revalidate)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [])
+
+  useEffect(() => {
+    if (!editingId) return
+    const remoteRequest = requests.find((request) => request.id === editingId)
+    if (!remoteRequest) return
+    setEditingBaseRequest((currentBase) => {
+      if (!currentBase || remoteRequest.revision <= currentBase.revision) return currentBase
+      setForm((currentForm) => reconcileRequestWithPendingPatch(
+        remoteRequest,
+        buildRequestPatch(currentBase, currentForm),
+      ))
+      return remoteRequest
+    })
+  }, [requests, editingId])
+
+  useEffect(() => {
+    if (!draftRestored) return
+    const hasDraftContent = Boolean(
+      editingId
+      || form.applicantName.trim()
+      || form.suggestedChange.trim()
+      || form.changeReason.trim()
+      || form.referenceMaterials?.trim()
+      || form.remarks?.trim(),
+    )
+    if (!hasDraftContent) {
+      clearRequestDraft(localStorage)
+      return
+    }
+    saveRequestDraft(localStorage, {
+      form,
+      editingId,
+      editingBaseRequest,
+      editingStartedRevision,
+    })
+  }, [draftRestored, form, editingId, editingBaseRequest, editingStartedRevision])
 
   const isAdmin = Boolean(adminProfile?.active)
   const isOwner = adminProfile?.role === 'owner'
@@ -419,7 +502,10 @@ function App() {
   }
 
   async function resetForm() {
+    clearRequestDraft(localStorage)
     setEditingId(null)
+    setEditingBaseRequest(null)
+    setEditingStartedRevision(null)
     setMissingFields([])
     setForm(await blankRequestWithCloudNo())
     setMessage('已切換到新增模式。')
@@ -433,21 +519,25 @@ function App() {
       setMessage('請先選擇人員。')
       return
     }
+    if (supabase) {
+      if (!person.id) {
+        setMessage('這位人員尚未同步到雲端，請由 Owner 先更新人員名單。')
+        return
+      }
+      try {
+        const sessionPerson = await claimPersonnelSession(supabase, person.id, personnelLogin.password)
+        setCurrentPerson(sessionPerson)
+        setPersonnelLoginOpen(false)
+        setPersonnelLogin((current) => ({ ...current, personKey: personKey(person), password: '' }))
+        setMessage(`目前人員：${sessionPerson.department} / ${sessionPerson.name}`)
+      } catch (error) {
+        setMessage(`人員登入失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+      }
+      return
+    }
     if (selectedLoginNeedsPassword) {
       let passed = false
-      if (supabase && person.id) {
-        const { data, error } = await supabase.rpc('verify_personnel_password', { p_personnel_id: person.id, p_password: personnelLogin.password })
-        if (error) {
-          const fetchHint = error.message.includes('Failed to fetch')
-            ? '目前無法連接 Supabase，請檢查 GitHub Actions Secret 裡的 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY 是否正確，或 Supabase 專案是否已暫停/刪除。'
-            : '請確認 Supabase 已執行最新版 schema.sql。'
-          setMessage(`人員登入驗證失敗：${error.message}。${fetchHint}`)
-          return
-        }
-        passed = Boolean(data)
-      } else {
-        passed = personnelLogin.password === person.password
-      }
+      passed = personnelLogin.password === person.password
       if (!passed) {
         setMessage('人員密碼錯誤，請重新輸入。')
         return
@@ -461,7 +551,15 @@ function App() {
     setMessage(`目前人員：${person.department} / ${person.name}`)
   }
 
-  function logoutPersonnel() {
+  async function logoutPersonnel() {
+    if (supabase) {
+      try {
+        await releasePersonnelSession(supabase)
+      } catch (error) {
+        setMessage(`退出身份失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+        return
+      }
+    }
     setCurrentPerson(null)
     localStorage.removeItem(personnelSessionKey)
     setMessage('已退出目前人員身份。')
@@ -497,22 +595,23 @@ function App() {
     }
     setMissingFields([])
     try {
-      const nextRequestNo = editingId ? form.requestNo : await getNextRequestNo()
       const saved = await saveRequest({
         ...form,
-        requestNo: nextRequestNo || form.requestNo || `SQMS-TEMP-${Date.now()}`,
         createdAt: form.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      })
+      }, editingBaseRequest, editingStartedRevision ?? undefined)
       setRequests((current) => {
         const exists = current.some((item) => item.id === saved.id)
         return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current]
       })
       setMessage(editingId ? `已更新 ${saved.requestNo}` : `已新增 ${saved.requestNo}`)
       setEditingId(null)
+      setEditingBaseRequest(null)
+      setEditingStartedRevision(null)
+      clearRequestDraft(localStorage)
       setForm(await blankRequestWithCloudNo())
     } catch (error) {
-      setMessage(`新增/保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。如剛刪除過資料，請先執行最新版 Supabase schema.sql 後再試。`)
+      setMessage(`新增/保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。草稿仍保留在畫面中。`)
     }
   }
 
@@ -523,6 +622,8 @@ function App() {
       return
     }
     setEditingId(request.id)
+    setEditingBaseRequest(request)
+    setEditingStartedRevision(request.revision)
     setMissingFields([])
     setForm({ ...request })
     setTab('form')
@@ -535,7 +636,7 @@ function App() {
     if (!confirm(`確定要刪除 ${request.requestNo}？此操作採軟刪除，雲端保留紀錄，但前台不再顯示。`)) return
     const deletedBy = adminProfile?.email || (currentPerson ? `${currentPerson.department}/${currentPerson.name}` : 'admin')
     try {
-      await softDeleteRequest(request.id, deletedBy, currentPerson)
+      await softDeleteRequest(request.id, deletedBy)
       await refresh()
       setMessage(`已軟刪除 ${request.requestNo}，並已同步雲端。`)
     } catch (error) {
@@ -594,25 +695,31 @@ function App() {
     }
   }
 
-  function persistRequestSourceOptions(nextOptions: string[]) {
-    const normalized = normalizeRequestSources(nextOptions)
-    setRequestSourceOptions(normalized)
-    saveRequestSourceOptions(normalized)
-    if (!normalized.includes(form.requestSource)) setForm((current) => ({ ...current, requestSource: normalized[0] ?? DEFAULT_REQUEST_SOURCES[0] }))
+  function applyRequestSourceOptions(options: string[]) {
+    setRequestSourceOptions(options)
+    if (!options.includes(form.requestSource)) setForm((current) => ({ ...current, requestSource: options[0] ?? DEFAULT_REQUEST_SOURCES[0] }))
   }
 
-  function addRequestSourceOption() {
+  async function addRequestSourceOption() {
     const value = newRequestSource.trim()
     if (!value) return
-    persistRequestSourceOptions([...requestSourceOptions, value])
-    setNewRequestSource('')
-    setMessage(`已新增需求來源：${value}`)
+    try {
+      applyRequestSourceOptions(await addSharedRequestSource(value))
+      setNewRequestSource('')
+      setMessage(`已新增需求來源：${value}`)
+    } catch (error) {
+      setMessage(`需求來源新增失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    }
   }
 
-  function removeRequestSourceOption(value: string) {
+  async function removeRequestSourceOption(value: string) {
     if (!confirm(`確定移除來源項目「${value}」？既有需求資料仍保留原文字，但新建單不再提供此選項。`)) return
-    persistRequestSourceOptions(requestSourceOptions.filter((item) => item !== value))
-    setMessage(`已移除需求來源選項：${value}`)
+    try {
+      applyRequestSourceOptions(await removeSharedRequestSource(value))
+      setMessage(`已移除需求來源選項：${value}`)
+    } catch (error) {
+      setMessage(`需求來源移除失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
+    }
   }
 
   function persistPersonnelRoster(nextRoster: Record<string, PersonnelUser[]>) {
@@ -773,7 +880,11 @@ function App() {
   async function handleAdminLogout() {
     await supabase?.auth.signOut()
     setAdminProfile(null)
+    setCurrentPerson(null)
     setAdminPassword('')
+    if (supabase) {
+      try { await ensureCloudSession(supabase) } catch { /* 下一次操作會再次嘗試建立工作階段。 */ }
+    }
     setMessage('已登出 owner。')
   }
 
@@ -785,6 +896,7 @@ function App() {
         setMessage(`登入失敗：${error.message}`)
         return
       }
+      setCurrentPerson(null)
       try {
         const profile = await acceptAdminSession(data.user.email ?? adminEmail)
         setMessage(`管理員已登入：${profile.email}（${profile.role}）`)
@@ -857,7 +969,7 @@ function App() {
           </div>
           <p className="duplicate-search-hint no-print">{duplicateSearchHint}</p>
           <form onSubmit={handleSubmit} className="request-form">
-            <label>需求編號<input value={form.requestNo} onChange={(e) => updateForm('requestNo', e.target.value)} /></label>
+            <label>需求編號<input value={form.requestNo} readOnly title="正式編號由伺服器在新增時自動分配" /></label>
             <label>需求來源 *<select className={fieldError('requestSource')} value={form.requestSource} onChange={(e) => updateForm('requestSource', e.target.value)}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
             <label>申請人 *<input className={fieldError('applicantName')} value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
             <label>大類<select value={form.categoryCode} onChange={(e) => {
@@ -1136,7 +1248,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
     <div className="section-title list-title-row">
       <div><p className="eyebrow">List</p><h2>{title}</h2></div>
       <div className="header-actions">
-        <button className="ghost" onClick={onRefresh}><RefreshCw size={14} />同步最新</button>
+        <button className="ghost" onClick={onRefresh} title="資料平時會自動更新；此按鈕只在需要時重新讀取"><RefreshCw size={14} />重新整理</button>
         {!hideExports && <><button className="ghost" onClick={() => window.print()}><Printer size={14} />列印/PDF</button><button className="ghost" onClick={() => exportCsv(requests, 'sqms修訂需求.csv')}><Download size={14} />CSV</button><button className="ghost" onClick={() => exportExcel(requests, 'sqms修訂需求.xlsx')}><FileSpreadsheet size={14} />Excel</button></>}
       </div>
     </div>

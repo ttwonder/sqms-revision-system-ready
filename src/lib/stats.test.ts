@@ -19,6 +19,7 @@ const base: ChangeRequest = {
   status: 'new',
   createdAt: '2026-06-01T08:00:00.000Z',
   updatedAt: '2026-06-01T08:00:00.000Z',
+  revision: 1,
   isDeleted: false,
   requestSource: '外部檢查',
 }

@@ -74,6 +74,7 @@ export interface ChangeRequest {
   publicEditNote?: string
   createdAt: string
   updatedAt: string
+  revision: number
   isDeleted: boolean
   deletedAt?: string
   deletedBy?: string

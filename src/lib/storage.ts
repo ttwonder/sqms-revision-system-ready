@@ -1,15 +1,25 @@
-import type { ChangeRequest, PersonnelUser } from '../types'
-import { fromDbRequest, isCloudConfigured, supabase, toDbRequest } from './supabaseClient'
+import type { ChangeRequest } from '../types'
+import { buildRequestPatch } from './collaboration'
+import { ensureCloudSession } from './cloudSession'
+import { executeIdempotentCommand } from './idempotency'
 import { DEFAULT_REQUEST_SOURCES } from './requestSources'
+import { fromDbRequestRow, RequestGateway } from './requestGateway'
+import { isCloudConfigured, supabase } from './supabaseClient'
 
 const LOCAL_KEY = 'sqms-change-requests-v1'
+const cloudGateway = supabase ? new RequestGateway(supabase) : null
 
 function nowIso() {
   return new Date().toISOString()
 }
 
 function normalizeLoadedRequest(request: ChangeRequest): ChangeRequest {
-  return { ...request, requestSource: request.requestSource || DEFAULT_REQUEST_SOURCES[0], remarks: request.remarks || '' }
+  return {
+    ...request,
+    requestSource: request.requestSource || DEFAULT_REQUEST_SOURCES[0],
+    remarks: request.remarks || '',
+    revision: Number(request.revision || 1),
+  }
 }
 
 export function makeRequestNo(sequence: number, date = new Date()) {
@@ -40,6 +50,7 @@ export function createBlankRequest(sequence: number): ChangeRequest {
     status: 'new',
     createdAt: now,
     updatedAt: now,
+    revision: 0,
     isDeleted: false,
   }
 }
@@ -52,7 +63,7 @@ export async function loadRequests(): Promise<ChangeRequest[]> {
       .eq('is_deleted', false)
       .order('created_at', { ascending: false })
     if (error) throw error
-    return (data ?? []).map(fromDbRequest).map(normalizeLoadedRequest)
+    return (data ?? []).map((row) => fromDbRequestRow(row)).map(normalizeLoadedRequest)
   }
   const raw = localStorage.getItem(LOCAL_KEY)
   return raw ? JSON.parse(raw).map(normalizeLoadedRequest) : []
@@ -67,12 +78,7 @@ function requestNoPrefix(date = new Date()) {
 
 export async function getNextRequestNo(date = new Date()): Promise<string> {
   const prefix = requestNoPrefix(date)
-  if (isCloudConfigured && supabase) {
-    const { data, error } = await supabase.rpc('next_sqms_request_no')
-    if (!error && typeof data === 'string' && data) return data
-    // 若線上還沒執行新版 SQL，先用當前秒數尾碼避免新增完全中斷；正式序號仍以 SQL RPC 為準。
-    return `${prefix}${String(new Date().getSeconds() || 1).padStart(2, '0')}`
-  }
+  if (isCloudConfigured && supabase) return '儲存後自動產生'
   const existing = await loadRequests()
   const maxSeq = existing.reduce((max, item) => {
     if (!item.requestNo?.startsWith(prefix)) return max
@@ -82,16 +88,26 @@ export async function getNextRequestNo(date = new Date()): Promise<string> {
   return `${prefix}${String(maxSeq + 1).padStart(2, '0')}`
 }
 
-export async function saveRequest(request: ChangeRequest): Promise<ChangeRequest> {
-  const clean: ChangeRequest = { ...request, updatedAt: nowIso() }
-  if (isCloudConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('change_requests')
-      .upsert(toDbRequest(clean), { onConflict: 'id' })
-      .select('*')
-      .single()
-    if (error) throw error
-    return fromDbRequest(data)
+export async function saveRequest(
+  request: ChangeRequest,
+  baseRequest?: ChangeRequest | null,
+  baseRevision = baseRequest?.revision,
+): Promise<ChangeRequest> {
+  const clean: ChangeRequest = {
+    ...request,
+    updatedAt: nowIso(),
+    revision: baseRequest ? baseRequest.revision + 1 : Math.max(request.revision, 1),
+  }
+  if (isCloudConfigured && supabase && cloudGateway) {
+    await ensureCloudSession(supabase)
+    if (baseRequest) {
+      const patch = buildRequestPatch(baseRequest, clean)
+      if (!Object.keys(patch).length) return baseRequest
+      return executeIdempotentCommand((operationId) => (
+        cloudGateway.patch(baseRequest.id, baseRevision ?? baseRequest.revision, patch, operationId)
+      ))
+    }
+    return executeIdempotentCommand((operationId) => cloudGateway.create(clean, operationId))
   }
   const existing = await loadRequests()
   const index = existing.findIndex((item) => item.id === clean.id)
@@ -102,38 +118,35 @@ export async function saveRequest(request: ChangeRequest): Promise<ChangeRequest
 
 export async function updateRequestStatus(id: string, status: ChangeRequest['status'], completionDate?: string): Promise<ChangeRequest> {
   const updatedAt = nowIso()
-  if (isCloudConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('change_requests')
-      .update({ status, completion_date: completionDate || null, updated_at: updatedAt })
-      .eq('id', id)
-      .select('*')
-      .single()
-    if (error) throw error
-    return fromDbRequest(data)
+  if (isCloudConfigured && supabase && cloudGateway) {
+    await ensureCloudSession(supabase)
+    return executeIdempotentCommand((operationId) => (
+      cloudGateway.transitionStatus(id, status, completionDate || null, operationId)
+    ))
   }
   const existing = await loadRequests()
-  const next = existing.map((item) => item.id === id ? { ...item, status, completionDate: completionDate || undefined, updatedAt } : item)
+  const next = existing.map((item) => item.id === id ? {
+    ...item,
+    status,
+    completionDate: completionDate || undefined,
+    updatedAt,
+    revision: item.revision + 1,
+  } : item)
   localStorage.setItem(LOCAL_KEY, JSON.stringify(next))
   const saved = next.find((item) => item.id === id)
   if (!saved) throw new Error('找不到要更新的需求')
   return saved
 }
 
-export async function softDeleteRequest(id: string, deletedBy = 'admin', personnel?: PersonnelUser | null): Promise<void> {
-  if (isCloudConfigured && supabase) {
-    const { data, error } = await supabase.rpc('soft_delete_request_by_manager', {
-      p_request_id: id,
-      p_personnel_id: personnel?.id || null,
-      p_deleted_by: deletedBy,
-    })
-    if (error) throw error
-    if (data !== true) throw new Error('刪除未成功：請確認目前身份是 Owner 或人員管理員，且 Supabase 已執行最新版 schema.sql。')
+export async function softDeleteRequest(id: string, deletedBy = 'admin'): Promise<void> {
+  if (isCloudConfigured && supabase && cloudGateway) {
+    await ensureCloudSession(supabase)
+    await executeIdempotentCommand((operationId) => cloudGateway.softDelete(id, operationId))
     return
   }
   const existing = await loadRequests()
   const next = existing.map((item) =>
-    item.id === id ? { ...item, isDeleted: true, deletedAt: nowIso(), deletedBy } : item,
+    item.id === id ? { ...item, isDeleted: true, deletedAt: nowIso(), deletedBy, revision: item.revision + 1 } : item,
   )
   localStorage.setItem(LOCAL_KEY, JSON.stringify(next))
 }
