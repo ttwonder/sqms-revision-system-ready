@@ -78,7 +78,7 @@ input.field-error, select.field-error, textarea.field-error { border-color: #fb7
 
 .table-wrap { overflow-x: auto; border-radius: 18px; border: 1px solid var(--line); }
 .request-table { width: 100%; border-collapse: collapse; min-width: 1160px; background: #fff; table-layout: fixed; }
-.col-status { width: 86px; }
+.col-status { width: 116px; }
 .col-urgency { width: 70px; }
 .col-no { width: 136px; }
 .col-scope { width: 220px; }
