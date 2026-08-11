@@ -1,10 +1,12 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const sql = readFileSync(
   new URL('./202608080001_collaboration_core.sql', import.meta.url),
   'utf8',
 )
+const businessDateHotfixUrl = new URL('./202608110001_fix_create_request_business_date.sql', import.meta.url)
 
 describe('collaboration core migration contract', () => {
   it('routes every request mutation through idempotent server commands', () => {
@@ -20,7 +22,21 @@ describe('collaboration core migration contract', () => {
     expect(sql).toContain('create table if not exists daily_request_counters')
     expect(sql).toContain("now() at time zone 'Asia/Taipei'")
     expect(sql).toContain('on conflict (business_date) do update')
+    expect(sql).toContain('request_business_date date :=')
+    expect(sql).not.toMatch(/\bbusiness_date date :=/)
     expect(sql).toContain("array['status','completion_date']")
+  })
+
+  it('ships a rerunnable production hotfix for the ambiguous business date reference', () => {
+    const hotfixPath = fileURLToPath(businessDateHotfixUrl)
+    expect(existsSync(hotfixPath)).toBe(true)
+    if (!existsSync(hotfixPath)) return
+
+    const hotfixSql = readFileSync(hotfixPath, 'utf8')
+    expect(hotfixSql).toContain('create or replace function create_change_request')
+    expect(hotfixSql).toContain('request_business_date date :=')
+    expect(hotfixSql).toContain('values (request_business_date, 1, now())')
+    expect(hotfixSql).not.toMatch(/\bbusiness_date date :=/)
   })
 
   it('blocks direct browser writes and records field overlap history', () => {

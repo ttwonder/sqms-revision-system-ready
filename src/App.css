@@ -48,10 +48,16 @@ input.field-error, select.field-error, textarea.field-error { border-color: #fb7
 .wide { grid-column: span 4; }
 .check { flex-direction: row; align-items: center; grid-column: span 2; padding: 12px; border-radius: 14px; background: #f8fbff; }
 .check input { width: auto; }
-.form-actions { display: flex; gap: 10px; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .primary, .ghost, .actions button { border: 0; border-radius: 12px; padding: 10px 14px; font-weight: 900; display: inline-flex; align-items: center; gap: 6px; }
 .primary { background: linear-gradient(135deg, var(--mint), var(--blue)); color: #244a57; }
 .ghost, .actions button { background: #f7f1f9; color: #675070; }
+.primary:disabled, .ghost:disabled { cursor: wait; opacity: .62; }
+.request-save-status { flex: 1 1 100%; display: inline-flex; align-items: center; gap: 7px; min-height: 22px; padding: 8px 10px; border-radius: 12px; font-size: .86rem; font-weight: 800; }
+.request-save-status.hint { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
+.request-save-status.saving { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.request-save-status.success { background: #ecfdf5; color: #166534; border: 1px solid #86efac; }
+.request-save-status.error { background: #fff1f2; color: #9f1239; border: 1px solid #fecdd3; }
 .danger { background: #ffe4e6 !important; color: #9f1239 !important; }
 
 .list-title-row { align-items: flex-start; }

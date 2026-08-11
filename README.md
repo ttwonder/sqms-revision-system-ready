@@ -5,6 +5,7 @@ GitHub Pages + Supabase 的靜態前端系統。
 ## 功能
 
 - 手機優先快速新增 / 修改需求
+- 表單草稿自動保留在本機，正式資料由「手動保存」送出並顯示成功／失敗狀態
 - 欄位級多人協作，不以整筆舊表單覆蓋他人修改
 - Realtime 自動更新、短暫斷線自動重試、未送出草稿恢復
 - 需求編號由 PostgreSQL 依台北日期原子分配
@@ -33,16 +34,19 @@ npm run dev
    - 已上線的專案只需在現有 schema 上執行這個 migration，不要清空或重建正式資料。
    - Migration 會保留既有需求，補上 revision、操作事件、人員 session、雲端需求來源與每日編號計數器。
    - 舊人員密碼會在資料庫內轉成雜湊並清除明文。
-5. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
+5. 若既有專案新增需求時曾顯示 `column reference "business_date" is ambiguous`，再執行：`supabase/migrations/202608110001_fix_create_request_business_date.sql`。
+   - 這個 hotfix 只替換新增需求 RPC，不會清除或改寫既有需求資料。
+   - 新安裝使用已修正的 collaboration migration；再次執行 hotfix 也安全。
+6. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
    - 這只用來讓每台瀏覽器取得可追蹤的 Auth session；一般使用者仍依網站人員名單選擇身份。
-6. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
+7. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
    - 預設 owner email 已寫入 SQL：`tuotuoworm@outlook.com`。
    - 如需更換 owner，請先修改 `supabase/schema.sql` 中 `insert into admin_users` 的 email。
-7. 之後可在網站「管理」頁直接維護管理員名單。
+8. 之後可在網站「管理」頁直接維護管理員名單。
    - Owner 可以新增/停用管理員。
    - Admin 可以進入管理界面和刪除需求，但不能維護管理員名單。
    - 不在 `admin_users` 名單中的 Auth 用戶即使有帳號密碼，也會提示無權限。
-8. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
+9. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
 
 > 部署順序必須是：先套用 migration 並啟用 Anonymous Sign-Ins，再部署新版前端。新版前端不會退回匿名直接寫表或整筆 `upsert`。
 

@@ -424,7 +424,7 @@ as $$
 declare
   existing_request_id uuid;
   saved change_requests%rowtype;
-  business_date date := (now() at time zone 'Asia/Taipei')::date;
+  request_business_date date := (now() at time zone 'Asia/Taipei')::date;
   sequence_value integer;
   generated_request_no text;
   actor_personnel_id uuid := current_sqms_personnel_id();
@@ -472,14 +472,14 @@ begin
   end if;
 
   insert into daily_request_counters (business_date, last_value, updated_at)
-  values (business_date, 1, now())
+  values (request_business_date, 1, now())
   on conflict (business_date) do update
   set
     last_value = daily_request_counters.last_value + 1,
     updated_at = now()
   returning last_value into sequence_value;
 
-  generated_request_no := 'SQMS-' || to_char(business_date, 'YYYYMMDD') || '-' || lpad(sequence_value::text, 2, '0');
+  generated_request_no := 'SQMS-' || to_char(request_business_date, 'YYYYMMDD') || '-' || lpad(sequence_value::text, 2, '0');
 
   insert into change_requests (
     request_no,

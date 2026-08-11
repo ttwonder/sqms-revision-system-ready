@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Trash2, UserPlus } from 'lucide-react'
+import { CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
@@ -238,6 +238,15 @@ function publicPersonSession(person: PersonnelUser): PersonnelUser {
 }
 
 type RequiredField = 'requestSource' | 'applicantName' | 'suggestedChange' | 'changeReason'
+type RequestSaveState = {
+  tone: 'hint' | 'saving' | 'success' | 'error'
+  text: string
+}
+
+const initialRequestSaveState: RequestSaveState = {
+  tone: 'hint',
+  text: '草稿會自動保留在此裝置；只有按下手動保存才會正式送出。',
+}
 
 function App() {
   const [tab, setTab] = useState<Tab>('form')
@@ -269,6 +278,8 @@ function App() {
   const [personnelDirty, setPersonnelDirty] = useState(false)
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
   const [draftRestored, setDraftRestored] = useState(false)
+  const [requestSaving, setRequestSaving] = useState(false)
+  const [requestSaveState, setRequestSaveState] = useState<RequestSaveState>(initialRequestSaveState)
 
   async function refresh(showLoading = true) {
     if (showLoading) setLoading(true)
@@ -376,6 +387,7 @@ function App() {
       setEditingBaseRequest(draft.editingBaseRequest)
       setEditingStartedRevision(draft.editingStartedRevision)
       setMessage('已恢復上次尚未送出的草稿。')
+      setRequestSaveState({ tone: 'hint', text: '已恢復尚未手動保存的草稿；確認內容後請按手動保存。' })
     }
     setDraftRestored(true)
   }, [])
@@ -496,6 +508,7 @@ function App() {
 
   function updateForm<K extends keyof ChangeRequest>(key: K, value: ChangeRequest[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+    setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
     if (missingFields.includes(key as RequiredField) && String(value ?? '').trim()) {
       setMissingFields((current) => current.filter((field) => field !== key))
     }
@@ -509,6 +522,7 @@ function App() {
     setMissingFields([])
     setForm(await blankRequestWithCloudNo())
     setMessage('已切換到新增模式。')
+    setRequestSaveState(initialRequestSaveState)
     setTab('form')
   }
 
@@ -578,8 +592,10 @@ function App() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
+    if (requestSaving) return
     if (editingId && !canEditRequests) {
       setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+      setRequestSaveState({ tone: 'error', text: '尚未保存：請先登入人員身份。草稿仍保留在此裝置。' })
       openPersonnelLogin()
       return
     }
@@ -591,9 +607,12 @@ function App() {
     if (requiredMissing.length) {
       setMissingFields(requiredMissing)
       setMessage('請補齊紅色必填欄位後再提交。')
+      setRequestSaveState({ tone: 'error', text: '尚未保存：請補齊紅色必填欄位。草稿仍保留在此裝置。' })
       return
     }
     setMissingFields([])
+    setRequestSaving(true)
+    setRequestSaveState({ tone: 'saving', text: '手動保存中，請稍候…' })
     try {
       const saved = await saveRequest({
         ...form,
@@ -604,14 +623,20 @@ function App() {
         const exists = current.some((item) => item.id === saved.id)
         return exists ? current.map((item) => (item.id === saved.id ? saved : item)) : [saved, ...current]
       })
-      setMessage(editingId ? `已更新 ${saved.requestNo}` : `已新增 ${saved.requestNo}`)
+      const successText = `保存成功：${editingId ? '已更新' : '已新增'} ${saved.requestNo}，已正式保存${isCloudConfigured ? '並同步雲端' : '在此裝置'}。`
+      setMessage(successText)
+      setRequestSaveState({ tone: 'success', text: successText })
       setEditingId(null)
       setEditingBaseRequest(null)
       setEditingStartedRevision(null)
       clearRequestDraft(localStorage)
       setForm(await blankRequestWithCloudNo())
     } catch (error) {
-      setMessage(`新增/保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。草稿仍保留在畫面中。`)
+      const errorText = `手動保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。草稿仍保留在畫面與此裝置中。`
+      setMessage(errorText)
+      setRequestSaveState({ tone: 'error', text: errorText })
+    } finally {
+      setRequestSaving(false)
     }
   }
 
@@ -628,6 +653,7 @@ function App() {
     setForm({ ...request })
     setTab('form')
     setMessage(`正在修改 ${request.requestNo}`)
+    setRequestSaveState({ tone: 'hint', text: `正在修改 ${request.requestNo}；修改後請按手動保存。` })
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -976,8 +1002,12 @@ function App() {
               const categoryCode = e.target.value
               const firstTopic = getTopicOptions(categoryCode)[0]
               setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: '' }))
+              setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
             }}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
-            <label>第一層主題<select value={form.topicCode} onChange={(e) => setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' }))}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
+            <label>第一層主題<select value={form.topicCode} onChange={(e) => {
+              setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' }))
+              setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
+            }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
             <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item) => <option key={item.code} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
             <label>期望完成日期<input type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
             <label>急迫度<select value={form.urgency} onChange={(e) => updateForm('urgency', e.target.value as Urgency)}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -987,7 +1017,14 @@ function App() {
             <label className="check"><input type="checkbox" checked={form.needRelatedFormUpdate} onChange={(e) => updateForm('needRelatedFormUpdate', e.target.checked)} /> 需要配套修改記錄表格</label>
             <label className="wide">推薦的修改內容或資料參考<textarea value={form.referenceMaterials ?? ''} onChange={(e) => updateForm('referenceMaterials', e.target.value)} rows={3} /></label>
             <label className="wide">備註<textarea value={form.remarks ?? ''} onChange={(e) => updateForm('remarks', e.target.value)} rows={3} placeholder="可填寫補充說明、處理注意事項或後續追蹤備註" /></label>
-            <div className="form-actions wide no-print"><button className="primary" type="submit">{editingId ? '保存修改' : '新增需求'}</button><button type="button" className="ghost" onClick={() => setTab('all')}>查看清單</button></div>
+            <div className="form-actions wide no-print">
+              <button className="primary" type="submit" disabled={requestSaving}><Save size={16} />{requestSaving ? '保存中…' : editingId ? '手動保存修改' : '手動保存新增需求'}</button>
+              <button type="button" className="ghost" onClick={() => setTab('all')} disabled={requestSaving}>查看清單</button>
+              <span className={`request-save-status ${requestSaveState.tone}`} role="status" aria-live="polite">
+                {requestSaveState.tone === 'success' && <CheckCircle2 size={17} />}
+                {requestSaveState.text}
+              </span>
+            </div>
           </form>
         </section>
       )}
