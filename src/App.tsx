@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import BatchRequestModal from './BatchRequestModal'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
@@ -247,6 +247,52 @@ type RequestSaveState = {
 const initialRequestSaveState: RequestSaveState = {
   tone: 'hint',
   text: '草稿會自動保留在此裝置；只有按下手動保存才會正式送出。',
+}
+
+type RequestSortKey = 'status' | 'urgency' | 'requestNo' | 'requestSource' | 'scope' | 'targetDueDate' | 'applicantName'
+type SortDirection = 'asc' | 'desc'
+type RequestSort = { key: RequestSortKey, direction: SortDirection }
+
+const statusSortRank: Record<RequestStatus, number> = { new: 0, processing: 1, completed: 2, cancelled: 3 }
+const urgencySortRank: Record<Urgency, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+const compareText = (left: string, right: string) => left.localeCompare(right, 'zh-Hant', { numeric: true, sensitivity: 'base' })
+
+function compareRequests(left: ChangeRequest, right: ChangeRequest, sort: RequestSort) {
+  let comparison = 0
+  switch (sort.key) {
+    case 'status':
+      comparison = statusSortRank[left.status] - statusSortRank[right.status]
+      break
+    case 'urgency':
+      comparison = urgencySortRank[left.urgency] - urgencySortRank[right.urgency]
+      break
+    case 'requestNo':
+      comparison = compareText(left.requestNo, right.requestNo)
+      break
+    case 'requestSource':
+      comparison = compareText(left.requestSource || '外部檢查', right.requestSource || '外部檢查')
+      break
+    case 'scope':
+      comparison = compareText(
+        [left.categoryCode, left.topicCode, left.manualItemCode ?? ''].join('|'),
+        [right.categoryCode, right.topicCode, right.manualItemCode ?? ''].join('|'),
+      )
+      break
+    case 'targetDueDate': {
+      const leftDate = left.targetDueDate.trim()
+      const rightDate = right.targetDueDate.trim()
+      if (!leftDate || !rightDate) {
+        if (!leftDate && !rightDate) comparison = 0
+        else return leftDate ? -1 : 1
+      } else comparison = leftDate.localeCompare(rightDate)
+      break
+    }
+    case 'applicantName':
+      comparison = compareText(left.applicantName.trim(), right.applicantName.trim())
+      break
+  }
+  if (comparison) return sort.direction === 'asc' ? comparison : -comparison
+  return compareText(left.requestNo, right.requestNo)
 }
 
 function App() {
@@ -1357,12 +1403,25 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
 }
 
 function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], isAdmin: boolean, canEditRequests: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
+  const [sort, setSort] = useState<RequestSort | null>(null)
   const sorted = [...requests].sort((a, b) => {
+    if (sort) return compareRequests(a, b, sort)
     const overdueDiff = Number(isOverdue(b)) - Number(isOverdue(a))
     if (overdueDiff) return overdueDiff
     return a.targetDueDate.localeCompare(b.targetDueDate)
   })
-  return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr><th>狀態</th><th>急迫度</th><th>編號</th><th>來源</th><th>歸屬</th><th>建議內容</th><th>期望日</th><th>申請人</th><th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
+  const changeSort = (key: RequestSortKey) => {
+    setSort((current) => current?.key === key
+      ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' })
+  }
+  const sortHeader = (key: RequestSortKey, label: string) => {
+    const active = sort?.key === key
+    const ariaSort = active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
+    const icon = !active ? <ArrowUpDown size={14} /> : sort.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />
+    return <th aria-sort={ariaSort}><button type="button" className={`sort-header ${active ? 'active' : ''}`} onClick={() => changeSort(key)} aria-label={label} title={`按${label}排序；再次點擊切換方向`}>{label}{icon}</button></th>
+  }
+  return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr>{sortHeader('status', '狀態')}{sortHeader('urgency', '急迫度')}{sortHeader('requestNo', '編號')}{sortHeader('requestSource', '來源')}{sortHeader('scope', '歸屬')}<th>建議內容</th>{sortHeader('targetDueDate', '期望日')}{sortHeader('applicantName', '申請人')}<th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
     const completed = request.status === 'completed'
     return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td>{canEditRequests ? <select className="status-select" value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td>{request.targetDueDate || '—'}</td><td>{request.applicantName}</td><td className="actions no-print">{canEditRequests ? <><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}</> : <span className="action-hint">登入後可修改</span>}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
   })}</tbody></table></div>

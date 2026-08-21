@@ -4,6 +4,33 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import type { ChangeRequest } from './types'
+
+function requestFixture(overrides: Partial<ChangeRequest>): ChangeRequest {
+  return {
+    id: crypto.randomUUID(),
+    requestNo: 'SQMS-20260821-01',
+    applicantName: '申請人',
+    requestSource: '外部檢查',
+    categoryCode: 'SMI',
+    topicCode: 'SMI-01',
+    manualItemCode: '',
+    scopeNote: '',
+    suggestedChange: '測試建議',
+    changeReason: '測試理由',
+    targetDueDate: '',
+    urgency: 'medium',
+    needRelatedFormUpdate: false,
+    referenceMaterials: '',
+    remarks: '',
+    status: 'new',
+    createdAt: '2026-08-21T00:00:00.000Z',
+    updatedAt: '2026-08-21T00:00:00.000Z',
+    revision: 1,
+    isDeleted: false,
+    ...overrides,
+  }
+}
 
 vi.mock('./lib/supabaseClient', () => ({
   supabase: null,
@@ -91,5 +118,52 @@ describe('request manual save flow', () => {
     expect(saved).toHaveLength(2)
     expect(saved.map((item: { applicantName: string }) => item.applicantName)).toEqual(expect.arrayContaining(['批量人員一', '批量人員二']))
     expect(new Set(saved.map((item: { requestNo: string }) => item.requestNo)).size).toBe(2)
+  })
+
+  it('sorts the shared request table from clickable headers in all three list tabs', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ requestNo: 'SQMS-20260821-03', applicantName: '王三', requestSource: '安全會議', topicCode: 'SMI-03', targetDueDate: '', urgency: 'high', status: 'processing' }),
+      requestFixture({ requestNo: 'SQMS-20260821-01', applicantName: '李一', requestSource: '外部檢查', topicCode: 'SMI-01', targetDueDate: '2026-09-01', urgency: 'low', status: 'completed', completionDate: '2026-08-20' }),
+      requestFixture({ requestNo: 'SQMS-20260821-02', applicantName: '陳二', requestSource: '內部檢查', topicCode: 'SMI-02', targetDueDate: '2026-08-25', urgency: 'urgent', status: 'new' }),
+    ]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+
+    const displayedRequestNos = () => within(screen.getByRole('table')).getAllByRole('row').slice(1).map((row) => row.querySelector('td:nth-child(3) b')?.textContent)
+    await waitFor(() => expect(displayedRequestNos()).toHaveLength(3))
+
+    const sortableLabels = ['狀態', '急迫度', '編號', '來源', '歸屬', '期望日', '申請人']
+    sortableLabels.forEach((label) => expect(within(screen.getByRole('table')).getByRole('button', { name: label })).toBeEnabled())
+
+    const requestNoHeader = within(screen.getByRole('table')).getByRole('button', { name: '編號' })
+    fireEvent.click(requestNoHeader)
+    expect(requestNoHeader.closest('th')).toHaveAttribute('aria-sort', 'ascending')
+    expect(displayedRequestNos()).toEqual(['SQMS-20260821-01', 'SQMS-20260821-02', 'SQMS-20260821-03'])
+
+    fireEvent.click(requestNoHeader)
+    expect(requestNoHeader.closest('th')).toHaveAttribute('aria-sort', 'descending')
+    expect(displayedRequestNos()).toEqual(['SQMS-20260821-03', 'SQMS-20260821-02', 'SQMS-20260821-01'])
+
+    fireEvent.click(within(screen.getByRole('table')).getByRole('button', { name: '期望日' }))
+    expect(displayedRequestNos()).toEqual(['SQMS-20260821-02', 'SQMS-20260821-01', 'SQMS-20260821-03'])
+
+    fireEvent.click(within(screen.getByRole('table')).getByRole('button', { name: '狀態' }))
+    expect(displayedRequestNos()).toEqual(['SQMS-20260821-02', 'SQMS-20260821-03', 'SQMS-20260821-01'])
+    fireEvent.click(within(screen.getByRole('table')).getByRole('button', { name: '急迫度' }))
+    expect(displayedRequestNos()).toEqual(['SQMS-20260821-02', 'SQMS-20260821-03', 'SQMS-20260821-01'])
+
+    for (const label of ['來源', '歸屬', '申請人']) {
+      const header = within(screen.getByRole('table')).getByRole('button', { name: label })
+      fireEvent.click(header)
+      const ascendingOrder = displayedRequestNos()
+      fireEvent.click(header)
+      expect(displayedRequestNos()).toEqual([...ascendingOrder].reverse())
+    }
+
+    for (const tabName of ['待完成', '已完成']) {
+      fireEvent.click(screen.getByRole('button', { name: tabName }))
+      await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument())
+      sortableLabels.forEach((label) => expect(within(screen.getByRole('table')).getByRole('button', { name: label })).toBeEnabled())
+    }
   })
 })
