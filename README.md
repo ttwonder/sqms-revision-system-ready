@@ -37,16 +37,20 @@ npm run dev
 5. 若既有專案新增需求時曾顯示 `column reference "business_date" is ambiguous`，再執行：`supabase/migrations/202608110001_fix_create_request_business_date.sql`。
    - 這個 hotfix 只替換新增需求 RPC，不會清除或改寫既有需求資料。
    - 新安裝使用已修正的 collaboration migration；再次執行 hotfix 也安全。
-6. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
-   - 這只用來讓每台瀏覽器取得可追蹤的 Auth session；一般使用者仍依網站人員名單選擇身份。
-7. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
+6. 執行：`supabase/migrations/202608210001_guest_edit_admin_lifecycle.sql`。
+   - 允許網站的匿名 Auth session 修改既有需求內容。
+   - 完成、再次修改狀態、其他狀態轉換與刪除仍只允許 Owner／管理員／人員管理員。
+   - Migration 可重複執行，不會清除或改寫既有需求。
+7. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
+   - 這讓未登入人員也能取得可追蹤的 Auth session，以新增或修改需求；完成、刪除及狀態管理仍須管理員身份。
+8. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
    - 預設 owner email 已寫入 SQL：`tuotuoworm@outlook.com`。
    - 如需更換 owner，請先修改 `supabase/schema.sql` 中 `insert into admin_users` 的 email。
-8. 之後可在網站「管理」頁直接維護管理員名單。
+9. 之後可在網站「管理」頁直接維護管理員名單。
    - Owner 可以新增/停用管理員。
-   - Admin 可以進入管理界面和刪除需求，但不能維護管理員名單。
+   - Admin 可以進入管理界面、完成及刪除需求，但不能維護管理員名單。
    - 不在 `admin_users` 名單中的 Auth 用戶即使有帳號密碼，也會提示無權限。
-9. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
+10. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
 
 > 部署順序必須是：先套用 migration 並啟用 Anonymous Sign-Ins，再部署新版前端。新版前端不會退回匿名直接寫表或整筆 `upsert`。
 

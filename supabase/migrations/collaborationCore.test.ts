@@ -7,6 +7,7 @@ const sql = readFileSync(
   'utf8',
 )
 const businessDateHotfixUrl = new URL('./202608110001_fix_create_request_business_date.sql', import.meta.url)
+const permissionsMigrationUrl = new URL('./202608210001_guest_edit_admin_lifecycle.sql', import.meta.url)
 
 describe('collaboration core migration contract', () => {
   it('routes every request mutation through idempotent server commands', () => {
@@ -37,6 +38,20 @@ describe('collaboration core migration contract', () => {
     expect(hotfixSql).toContain('request_business_date date :=')
     expect(hotfixSql).toContain('values (request_business_date, 1, now())')
     expect(hotfixSql).not.toMatch(/\bbusiness_date date :=/)
+  })
+
+  it('ships a rerunnable permission migration for guest edits and manager-only lifecycle changes', () => {
+    const migrationPath = fileURLToPath(permissionsMigrationUrl)
+    expect(existsSync(migrationPath)).toBe(true)
+    if (!existsSync(migrationPath)) return
+
+    const migrationSql = readFileSync(migrationPath, 'utf8')
+    expect(migrationSql).toContain('create or replace function can_edit_sqms_requests()')
+    expect(migrationSql).toContain('select auth.uid() is not null')
+    expect(migrationSql).toContain('create or replace function transition_change_request_status')
+    expect(migrationSql).toContain('if not can_manage_sqms_requests() then')
+    expect(migrationSql).toContain('只有管理員可以修改需求狀態')
+    expect(migrationSql).toContain('grant execute on function patch_change_request(uuid, uuid, bigint, jsonb) to authenticated')
   })
 
   it('blocks direct browser writes and records field overlap history', () => {

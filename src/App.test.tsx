@@ -43,10 +43,12 @@ vi.mock('./lib/supabaseClient', () => ({
 describe('request manual save flow', () => {
   beforeEach(() => {
     localStorage.clear()
+    window.scrollTo = vi.fn()
   })
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
   })
 
   it('shows an explicit manual-save button and confirms an acknowledged save', async () => {
@@ -118,6 +120,78 @@ describe('request manual save flow', () => {
     fireEvent.change(batchCategory, { target: { value: 'SMP' } })
     expect(batchTopic).toHaveValue('SMP-01')
     expect(batchItem).toHaveValue('SSOR-001')
+  })
+
+  it('allows an unauthenticated visitor to modify an existing request', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ id: 'guest-edit', requestNo: 'SQMS-20260821-11', remarks: '' }),
+    ]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+
+    const table = await screen.findByRole('table')
+    fireEvent.click(within(table).getByRole('button', { name: '修改' }))
+    expect(screen.queryByRole('dialog', { name: '人員登入或切換' })).not.toBeInTheDocument()
+    expect(await screen.findByText('修改既有需求')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('備註'), { target: { value: '訪客直接修改' } })
+    fireEvent.click(screen.getByRole('button', { name: '手動保存修改' }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/保存成功：已更新 SQMS-20260821-11/)
+    expect(JSON.parse(localStorage.getItem('sqms-change-requests-v1') || '[]')[0].remarks).toBe('訪客直接修改')
+  })
+
+  it('shows selection and complete/delete actions only to managers and runs both bulk actions', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ id: 'bulk-new', requestNo: 'SQMS-20260821-21', status: 'new' }),
+      requestFixture({ id: 'bulk-processing', requestNo: 'SQMS-20260821-22', status: 'processing' }),
+      requestFixture({ id: 'bulk-completed', requestNo: 'SQMS-20260821-23', status: 'completed', completionDate: '2026-08-20' }),
+    ]))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+
+    let table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('button', { name: '修改' })).toHaveLength(3)
+    expect(within(table).queryByRole('button', { name: '完成' })).not.toBeInTheDocument()
+    expect(within(table).queryByRole('button', { name: '刪除' })).not.toBeInTheDocument()
+    expect(within(table).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /批量完成/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /批量刪除/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
+    fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
+
+    for (const tabName of ['統計清單', '待完成', '已完成']) {
+      fireEvent.click(screen.getByRole('button', { name: tabName }))
+      const tabTable = screen.getByRole('table')
+      expect(within(tabTable).getByRole('checkbox', { name: '全選目前清單' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /批量完成/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /批量刪除/ })).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+
+    table = screen.getByRole('table')
+    expect(within(table).getAllByRole('button', { name: '修改' })).toHaveLength(3)
+    expect(within(table).getAllByRole('button', { name: '完成' })).toHaveLength(2)
+    expect(within(table).getAllByRole('button', { name: '刪除' })).toHaveLength(3)
+    const selectAll = within(table).getByRole('checkbox', { name: '全選目前清單' })
+    fireEvent.click(selectAll)
+    expect(screen.getByRole('button', { name: '批量完成（2）' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '批量刪除（3）' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '批量完成（2）' }))
+    const completionDialog = screen.getByRole('dialog', { name: '批量完成需求' })
+    fireEvent.click(within(completionDialog).getByRole('button', { name: '確認批量完成' }))
+    expect(await screen.findByText(/批量完成成功：已完成 2 筆需求/)).toBeInTheDocument()
+
+    table = screen.getByRole('table')
+    fireEvent.click(within(table).getByRole('checkbox', { name: '全選目前清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '批量刪除（3）' }))
+    expect(await screen.findByText(/批量刪除成功：已刪除 3 筆需求/)).toBeInTheDocument()
+    const saved = JSON.parse(localStorage.getItem('sqms-change-requests-v1') || '[]')
+    expect(saved.every((request: ChangeRequest) => request.isDeleted)).toBe(true)
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
   })
 
   it('opens batch entry and saves two independent requests', async () => {

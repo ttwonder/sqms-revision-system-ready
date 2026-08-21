@@ -329,6 +329,9 @@ function App() {
   const [personnelLogin, setPersonnelLogin] = useState({ department: personnelDepartments[0], personKey: '', password: '' })
   const [personnelDirty, setPersonnelDirty] = useState(false)
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
+  const [bulkCompletingRequests, setBulkCompletingRequests] = useState<ChangeRequest[] | null>(null)
+  const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([])
+  const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [batchRequestOpen, setBatchRequestOpen] = useState(false)
   const [draftRestored, setDraftRestored] = useState(false)
   const [requestSaving, setRequestSaving] = useState(false)
@@ -499,6 +502,10 @@ function App() {
   }, [currentPerson])
 
   useEffect(() => {
+    setSelectedRequestIds([])
+  }, [tab, filters, searchQuery])
+
+  useEffect(() => {
     if (!editingId) return
     const remoteRequest = requests.find((request) => request.id === editingId)
     if (!remoteRequest) return
@@ -540,7 +547,6 @@ function App() {
   const personnelForLogin = personnelRoster[personnelLogin.department] ?? []
   const selectedLoginPerson = personnelForLogin.find((person) => personKey(person) === personnelLogin.personKey) ?? personnelForLogin[0]
   const selectedLoginNeedsPassword = Boolean(selectedLoginPerson?.hasPassword || selectedLoginPerson?.password)
-  const canEditRequests = Boolean(currentPerson || isAdmin)
 
   const filtered = useMemo(() => filterRequests(requests, filters), [requests, filters])
   const searched = useMemo(() => filtered.filter((request) => requestMatchesSearch(request, searchQuery)), [filtered, searchQuery])
@@ -680,12 +686,6 @@ function App() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
     if (requestSaving) return
-    if (editingId && !canEditRequests) {
-      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
-      setRequestSaveState({ tone: 'error', text: '尚未保存：請先登入人員身份。草稿仍保留在此裝置。' })
-      openPersonnelLogin()
-      return
-    }
     const requiredMissing: RequiredField[] = []
     if (!form.requestSource) requiredMissing.push('requestSource')
     if (!form.applicantName.trim()) requiredMissing.push('applicantName')
@@ -728,11 +728,6 @@ function App() {
   }
 
   function startEdit(request: ChangeRequest) {
-    if (!canEditRequests) {
-      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
-      openPersonnelLogin()
-      return
-    }
     setEditingId(request.id)
     setEditingBaseRequest(request)
     setEditingStartedRevision(request.revision)
@@ -758,10 +753,9 @@ function App() {
   }
 
   async function completeRequest(request: ChangeRequest, completionDate: string) {
-    if (!canEditRequests) {
-      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
+    if (!canManagePage) {
+      setMessage('只有管理員可以完成需求。')
       setCompletingRequest(null)
-      openPersonnelLogin()
       return
     }
     try {
@@ -775,9 +769,8 @@ function App() {
   }
 
   async function reopenRequest(request: ChangeRequest) {
-    if (!canEditRequests) {
-      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
-      openPersonnelLogin()
+    if (!canManagePage) {
+      setMessage('只有管理員可以將已完成需求轉回待完成。')
       return
     }
     try {
@@ -790,9 +783,8 @@ function App() {
   }
 
   async function changeRequestStatus(request: ChangeRequest, status: RequestStatus) {
-    if (!canEditRequests) {
-      setMessage('請先進行人員登入，未登入不能修改已立案內容。')
-      openPersonnelLogin()
+    if (!canManagePage) {
+      setMessage('只有管理員可以修改需求狀態。')
       return
     }
     if (status === 'completed') {
@@ -1036,6 +1028,73 @@ function App() {
 
   const activeListTitle = tab === 'pending' ? '待完成清單' : tab === 'completed' ? '已完成清單' : '統計清單'
   const listForActiveTab = tab === 'pending' ? pending : tab === 'completed' ? completed : searched
+  const activeRequestIds = listForActiveTab.map((request) => request.id)
+  const selectedRequestsForActiveList = listForActiveTab.filter((request) => selectedRequestIds.includes(request.id))
+  const completableSelectedRequests = selectedRequestsForActiveList.filter((request) => request.status !== 'completed' && request.status !== 'cancelled')
+
+  function toggleRequestSelection(requestId: string) {
+    setSelectedRequestIds((current) => current.includes(requestId)
+      ? current.filter((id) => id !== requestId)
+      : [...current, requestId])
+  }
+
+  function toggleAllActiveRequests() {
+    setSelectedRequestIds((current) => {
+      const allSelected = activeRequestIds.length > 0 && activeRequestIds.every((id) => current.includes(id))
+      if (allSelected) return current.filter((id) => !activeRequestIds.includes(id))
+      return [...new Set([...current, ...activeRequestIds])]
+    })
+  }
+
+  function openBulkCompletion() {
+    if (!canManagePage || completableSelectedRequests.length === 0) return
+    setBulkCompletingRequests(completableSelectedRequests)
+  }
+
+  async function completeSelectedRequests(completionDate: string) {
+    if (!canManagePage || !bulkCompletingRequests?.length || bulkActionBusy) return
+    setBulkActionBusy(true)
+    const completedIds: string[] = []
+    const failures: string[] = []
+    for (const request of bulkCompletingRequests) {
+      try {
+        const saved = await updateRequestStatus(request.id, 'completed', completionDate)
+        completedIds.push(saved.id)
+        setRequests((current) => current.map((item) => item.id === saved.id ? saved : item))
+      } catch (error) {
+        failures.push(`${request.requestNo}：${error instanceof Error ? error.message : '未知錯誤'}`)
+      }
+    }
+    setSelectedRequestIds((current) => current.filter((id) => !completedIds.includes(id)))
+    setBulkCompletingRequests(null)
+    setBulkActionBusy(false)
+    setMessage(failures.length
+      ? `批量完成部分成功：已完成 ${completedIds.length} 筆，失敗 ${failures.length} 筆。${failures.join('；')}`
+      : `批量完成成功：已完成 ${completedIds.length} 筆需求，完成日期：${completionDate}。`)
+  }
+
+  async function deleteSelectedRequests() {
+    if (!canManagePage || selectedRequestsForActiveList.length === 0 || bulkActionBusy) return
+    if (!confirm(`確定批量刪除已選取的 ${selectedRequestsForActiveList.length} 筆需求？此操作採軟刪除，雲端仍保留紀錄。`)) return
+    setBulkActionBusy(true)
+    const deletedIds: string[] = []
+    const failures: string[] = []
+    const deletedBy = adminProfile?.email || (currentPerson ? `${currentPerson.department}/${currentPerson.name}` : 'admin')
+    for (const request of selectedRequestsForActiveList) {
+      try {
+        await softDeleteRequest(request.id, deletedBy)
+        deletedIds.push(request.id)
+      } catch (error) {
+        failures.push(`${request.requestNo}：${error instanceof Error ? error.message : '未知錯誤'}`)
+      }
+    }
+    await refresh(false)
+    setSelectedRequestIds((current) => current.filter((id) => !deletedIds.includes(id)))
+    setBulkActionBusy(false)
+    setMessage(failures.length
+      ? `批量刪除部分成功：已刪除 ${deletedIds.length} 筆，失敗 ${failures.length} 筆。${failures.join('；')}`
+      : `批量刪除成功：已刪除 ${deletedIds.length} 筆需求。`)
+  }
 
   return (
     <div className="app-shell">
@@ -1052,7 +1111,7 @@ function App() {
         <div>
           <p className="eyebrow">Current User</p>
           {currentPerson ? <strong>{currentPerson.department} / {currentPerson.name}</strong> : <strong>未登入人員</strong>}
-          <span className="subtle">未登入仍可新增提交；修改、結案或再次修改已立案內容需先登入人員。</span>
+          <span className="subtle">未登入仍可新增與修改需求；完成、刪除及狀態管理僅限管理員。</span>
         </div>
         <div className="identity-actions">
           <button className="primary" type="button" onClick={openPersonnelLogin}>人員登入 / 切換</button>
@@ -1127,8 +1186,8 @@ function App() {
       {(tab === 'all' || tab === 'pending' || tab === 'completed') && (
         <section className="panel">
           <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
-          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} />
-          <RequestTable requests={listForActiveTab} isAdmin={canManagePage} canEditRequests={canEditRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
+          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} canManageRequests={canManagePage} selectedCount={selectedRequestsForActiveList.length} completableSelectedCount={completableSelectedRequests.length} bulkActionBusy={bulkActionBusy} onBulkComplete={openBulkCompletion} onBulkDelete={deleteSelectedRequests} />
+          <RequestTable requests={listForActiveTab} isAdmin={canManagePage} selectionEnabled={canManagePage} selectedRequestIds={selectedRequestIds} onToggleSelection={toggleRequestSelection} onToggleAll={toggleAllActiveRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
         </section>
       )}
 
@@ -1140,7 +1199,6 @@ function App() {
           currentPerson={currentPerson}
           filteredRequests={filtered}
           canAccessAdminPage={canManagePage}
-          canEditRequests={canEditRequests}
           isAdmin={canManagePage}
           isOwner={isOwner}
           requestSourceOptions={requestSourceOptions}
@@ -1184,6 +1242,7 @@ function App() {
         onCancel={() => setBatchRequestOpen(false)}
         onComplete={completeBatchRequest}
       />}
+      {bulkCompletingRequests && <BulkCompletionDateModal count={bulkCompletingRequests.length} busy={bulkActionBusy} onCancel={() => setBulkCompletingRequests(null)} onConfirm={completeSelectedRequests} />}
       {completingRequest && <CompletionDateModal request={completingRequest} onCancel={() => setCompletingRequest(null)} onConfirm={(date) => completeRequest(completingRequest, date)} />}
     </div>
   )
@@ -1222,7 +1281,6 @@ type AdminPanelProps = {
   currentPerson: PersonnelUser | null
   filteredRequests: ChangeRequest[]
   canAccessAdminPage: boolean
-  canEditRequests: boolean
   isAdmin: boolean
   isOwner: boolean
   requestSourceOptions: string[]
@@ -1250,7 +1308,7 @@ type AdminPanelProps = {
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, canEditRequests, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onChangeRequestStatus, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onChangeRequestStatus, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   const managerLabel = adminProfile ? `${adminProfile.email}（${adminProfile.role === 'owner' ? 'Owner' : 'Admin'}）` : currentPerson ? `${currentPerson.department} / ${currentPerson.name}（管理員）` : ''
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{adminProfile && <button className="ghost no-print" onClick={onAdminLogout}>登出 Owner</button>}</div>
@@ -1298,7 +1356,7 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, fi
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Requests</p><h3>需求刪除管理</h3></div></div>
           <p className="subtle">刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p>
-          <RequestTable requests={filteredRequests} isAdmin={isAdmin} canEditRequests={canEditRequests} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} onStatusChange={onChangeRequestStatus} />
+          <RequestTable requests={filteredRequests} isAdmin={isAdmin} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} onStatusChange={onChangeRequestStatus} />
         </section>
       </div>
     )}
@@ -1338,6 +1396,19 @@ function CompletionDateModal({ request, onCancel, onConfirm }: { request: Change
   </div>
 }
 
+function BulkCompletionDateModal({ count, busy, onCancel, onConfirm }: { count: number, busy: boolean, onCancel: () => void, onConfirm: (date: string) => void }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  return <div className="modal-backdrop no-print" role="dialog" aria-modal="true" aria-label="批量完成需求">
+    <section className="completion-modal">
+      <p className="eyebrow">Bulk Complete</p>
+      <h3>批量完成 {count} 筆需求</h3>
+      <p className="subtle">所有選取的未完成需求將使用同一個完成日期。</p>
+      <label>實際完成日期<input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={busy} /></label>
+      <div className="modal-actions"><button className="ghost" type="button" onClick={onCancel} disabled={busy}>取消</button><button className="primary" type="button" onClick={() => date && onConfirm(date)} disabled={busy}>{busy ? '批量完成中…' : '確認批量完成'}</button></div>
+    </section>
+  </div>
+}
+
 function PrintHeader({ title, filters, count, searchQuery = '' }: { title: string, filters: Filters, count: number, searchQuery?: string }) {
   const printDate = new Date().toLocaleString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   const filterSummary = [
@@ -1362,7 +1433,7 @@ function PrintHeader({ title, filters, count, searchQuery = '' }: { title: strin
   </div>
 }
 
-function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery, requestSourceOptions = DEFAULT_REQUEST_SOURCES as unknown as string[] }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void, requestSourceOptions?: string[] }) {
+function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery, requestSourceOptions = DEFAULT_REQUEST_SOURCES as unknown as string[], canManageRequests = false, selectedCount = 0, completableSelectedCount = 0, bulkActionBusy = false, onBulkComplete, onBulkDelete }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void, requestSourceOptions?: string[], canManageRequests?: boolean, selectedCount?: number, completableSelectedCount?: number, bulkActionBusy?: boolean, onBulkComplete?: () => void, onBulkDelete?: () => void }) {
   const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []
   const [rangePreset, setRangePreset] = useState('')
   const applyRecentDays = (days: number) => {
@@ -1405,12 +1476,16 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{t.code}｜{t.titleZh}</option>)}</select>
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.urgency} onChange={(e) => setFilters({ ...filters, urgency: e.target.value as Urgency | 'all' })}><option value="all">全部急迫度</option>{Object.entries(urgencyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-      <button className="ghost" onClick={clearFilters}>清除</button>
+      <button className="ghost" type="button" onClick={clearFilters}>清除</button>
+      {canManageRequests && <div className="bulk-action-group">
+        <button className="primary" type="button" onClick={onBulkComplete} disabled={bulkActionBusy || completableSelectedCount === 0}>批量完成（{completableSelectedCount}）</button>
+        <button className="ghost danger" type="button" onClick={onBulkDelete} disabled={bulkActionBusy || selectedCount === 0}>批量刪除（{selectedCount}）</button>
+      </div>}
     </div>
   </div>
 }
 
-function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], isAdmin: boolean, canEditRequests: boolean, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
+function RequestTable({ requests, isAdmin, selectionEnabled = false, selectedRequestIds = [], onToggleSelection, onToggleAll, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], isAdmin: boolean, selectionEnabled?: boolean, selectedRequestIds?: string[], onToggleSelection?: (requestId: string) => void, onToggleAll?: () => void, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
   const [sort, setSort] = useState<RequestSort | null>(null)
   const sorted = [...requests].sort((a, b) => {
     if (sort) return compareRequests(a, b, sort)
@@ -1418,6 +1493,8 @@ function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, on
     if (overdueDiff) return overdueDiff
     return a.targetDueDate.localeCompare(b.targetDueDate)
   })
+  const allSelected = requests.length > 0 && requests.every((request) => selectedRequestIds.includes(request.id))
+  const someSelected = requests.some((request) => selectedRequestIds.includes(request.id))
   const changeSort = (key: RequestSortKey) => {
     setSort((current) => current?.key === key
       ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
@@ -1429,9 +1506,10 @@ function RequestTable({ requests, isAdmin, canEditRequests, onEdit, onDelete, on
     const icon = !active ? <ArrowUpDown size={14} /> : sort.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />
     return <th aria-sort={ariaSort}><button type="button" className={`sort-header ${active ? 'active' : ''}`} onClick={() => changeSort(key)} aria-label={label} title={`按${label}排序；再次點擊切換方向`}>{label}{icon}</button></th>
   }
-  return <div className="table-wrap"><table className="request-table"><colgroup><col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr>{sortHeader('status', '狀態')}{sortHeader('urgency', '急迫度')}{sortHeader('requestNo', '編號')}{sortHeader('requestSource', '來源')}{sortHeader('scope', '歸屬')}<th>建議內容</th>{sortHeader('targetDueDate', '期望日')}{sortHeader('applicantName', '申請人')}<th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
+  return <div className="table-wrap"><table className={`request-table ${selectionEnabled ? 'with-selection' : ''}`}><colgroup>{selectionEnabled && <col className="col-select no-print" />}<col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr>{selectionEnabled && <th className="select-cell no-print"><input className="table-select" type="checkbox" aria-label="全選目前清單" checked={allSelected} ref={(node) => { if (node) node.indeterminate = someSelected && !allSelected }} onChange={onToggleAll} /></th>}{sortHeader('status', '狀態')}{sortHeader('urgency', '急迫度')}{sortHeader('requestNo', '編號')}{sortHeader('requestSource', '來源')}{sortHeader('scope', '歸屬')}<th>建議內容</th>{sortHeader('targetDueDate', '期望日')}{sortHeader('applicantName', '申請人')}<th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={selectionEnabled ? 10 : 9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
     const completed = request.status === 'completed'
-    return <tr key={request.id} className={isOverdue(request) ? 'overdue' : ''}><td>{canEditRequests ? <select className="status-select" value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td>{request.targetDueDate || '—'}</td><td>{request.applicantName}</td><td className="actions no-print">{canEditRequests ? <><button onClick={() => onEdit(request)}>修改</button>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}</> : <span className="action-hint">登入後可修改</span>}{isAdmin && <button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button>}</td></tr>
+    const selected = selectedRequestIds.includes(request.id)
+    return <tr key={request.id} className={`${isOverdue(request) ? 'overdue' : ''}${selected ? ' selected' : ''}`}>{selectionEnabled && <td className="select-cell no-print"><input className="table-select" type="checkbox" aria-label={`選取 ${request.requestNo}`} checked={selected} onChange={() => onToggleSelection?.(request.id)} /></td>}<td>{isAdmin ? <select className="status-select" value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td>{urgencyLabels[request.urgency]}</td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td>{request.targetDueDate || '—'}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}<button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button></>}</td></tr>
   })}</tbody></table></div>
 }
 export default App
