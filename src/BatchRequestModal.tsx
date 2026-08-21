@@ -58,18 +58,20 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
 
   function changeCategory(key: string, categoryCode: string) {
     const firstTopic = getTopicOptions(categoryCode)[0]
+    const firstItem = getManualItemOptions(firstTopic?.code)[0]
     setEntries((current) => current.map((entry) => entry.key === key && entry.state !== 'saved' ? {
       ...entry,
-      request: { ...entry.request, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: '' },
+      request: { ...entry.request, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: firstItem?.code ?? '' },
       state: entry.state === 'error' ? 'pending' : entry.state,
       error: undefined,
     } : entry))
   }
 
   function changeTopic(key: string, topicCode: string) {
+    const firstItem = getManualItemOptions(topicCode)[0]
     setEntries((current) => current.map((entry) => entry.key === key && entry.state !== 'saved' ? {
       ...entry,
-      request: { ...entry.request, topicCode, manualItemCode: '' },
+      request: { ...entry.request, topicCode, manualItemCode: firstItem?.code ?? '' },
       state: entry.state === 'error' ? 'pending' : entry.state,
       error: undefined,
     } : entry))
@@ -169,7 +171,7 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
                 <label>申請人 *<input className={fieldError('applicantName')} value={entry.request.applicantName} onChange={(event) => updateEntry(entry.key, 'applicantName', event.target.value)} placeholder="輸入姓名" disabled={disabled} /></label>
                 <label>大類<select value={entry.request.categoryCode} onChange={(event) => changeCategory(entry.key, event.target.value)} disabled={disabled}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
                 <label>第一層主題<select value={entry.request.topicCode} onChange={(event) => changeTopic(entry.key, event.target.value)} disabled={disabled}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
-                <label>第二層手冊 / 文件項<select value={entry.request.manualItemCode ?? ''} onChange={(event) => updateEntry(entry.key, 'manualItemCode', event.target.value)} disabled={disabled}><option value="">只具體到第一層主題</option>{itemOptions.map((item) => <option key={item.code} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
+                <label>第二層手冊 / 文件項<select value={entry.request.manualItemCode ?? ''} onChange={(event) => updateEntry(entry.key, 'manualItemCode', event.target.value)} disabled={disabled}><option value="">只具體到第一層主題</option>{itemOptions.map((item, itemIndex) => <option key={`${entry.request.topicCode}-${item.code}-${itemIndex}`} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
                 <label>期望完成日期<input type="date" value={entry.request.targetDueDate} onChange={(event) => updateEntry(entry.key, 'targetDueDate', event.target.value)} disabled={disabled} /></label>
                 <label>急迫度<select value={entry.request.urgency} onChange={(event) => updateEntry(entry.key, 'urgency', event.target.value as Urgency)} disabled={disabled}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
                 <label className="wide">修改內容歸屬補充<input value={entry.request.scopeNote ?? ''} onChange={(event) => updateEntry(entry.key, 'scopeNote', event.target.value)} placeholder="例如：某段落、某表格、某流程" disabled={disabled} /></label>

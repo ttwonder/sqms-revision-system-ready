@@ -295,10 +295,15 @@ function compareRequests(left: ChangeRequest, right: ChangeRequest, sort: Reques
   return compareText(left.requestNo, right.requestNo)
 }
 
+function createCatalogBlankRequest(sequence: number) {
+  const blank = createBlankRequest(sequence)
+  return { ...blank, manualItemCode: getManualItemOptions(blank.topicCode)[0]?.code ?? '' }
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('form')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
-  const [form, setForm] = useState<ChangeRequest>(() => createBlankRequest(1))
+  const [form, setForm] = useState<ChangeRequest>(() => createCatalogBlankRequest(1))
   const [missingFields, setMissingFields] = useState<RequiredField[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingBaseRequest, setEditingBaseRequest] = useState<ChangeRequest | null>(null)
@@ -551,7 +556,7 @@ function App() {
   }
 
   async function blankRequestWithCloudNo() {
-    const blank = { ...createBlankRequest(nextSequence + 1), applicantName: currentPerson?.name ?? '' }
+    const blank = { ...createCatalogBlankRequest(nextSequence + 1), applicantName: currentPerson?.name ?? '' }
     try {
       return { ...blank, requestNo: await getNextRequestNo() }
     } catch {
@@ -650,7 +655,7 @@ function App() {
   }
 
   function createBatchRequest() {
-    const blank = createBlankRequest(nextSequence + 1)
+    const blank = createCatalogBlankRequest(nextSequence + 1)
     return {
       ...blank,
       requestNo: isCloudConfigured ? '儲存後自動產生' : blank.requestNo,
@@ -1086,14 +1091,17 @@ function App() {
             <label>大類<select value={form.categoryCode} onChange={(e) => {
               const categoryCode = e.target.value
               const firstTopic = getTopicOptions(categoryCode)[0]
-              setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: '' }))
+              const firstItem = getManualItemOptions(firstTopic?.code)[0]
+              setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: firstItem?.code ?? '' }))
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
             }}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
             <label>第一層主題<select value={form.topicCode} onChange={(e) => {
-              setForm((current) => ({ ...current, topicCode: e.target.value, manualItemCode: '' }))
+              const topicCode = e.target.value
+              const firstItem = getManualItemOptions(topicCode)[0]
+              setForm((current) => ({ ...current, topicCode, manualItemCode: firstItem?.code ?? '' }))
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
             }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
-            <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item) => <option key={item.code} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
+            <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item, index) => <option key={`${form.topicCode}-${item.code}-${index}`} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
             <label>期望完成日期<input type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
             <label>急迫度<select value={form.urgency} onChange={(e) => updateForm('urgency', e.target.value as Urgency)}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="wide">修改內容歸屬補充<input value={form.scopeNote ?? ''} onChange={(e) => updateForm('scopeNote', e.target.value)} placeholder="例如：某段落、某表格、某流程" /></label>

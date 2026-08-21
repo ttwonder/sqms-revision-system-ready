@@ -89,6 +89,37 @@ describe('request manual save flow', () => {
     expect(within(batchDialog).getByLabelText('申請人 *')).toHaveValue('呂學修副總')
   })
 
+  it('cascades category and topic changes into the first matching manual item', async () => {
+    render(<App />)
+
+    const mainCategory = await screen.findByLabelText('大類')
+    const mainTopic = screen.getByLabelText('第一層主題')
+    const mainItem = screen.getByLabelText('第二層手冊 / 文件項')
+    expect(mainItem).toHaveValue('SHM-001')
+    fireEvent.change(mainTopic, { target: { value: 'SMI-02' } })
+    expect(mainItem).toHaveValue('SOI-001')
+    expect(within(mainItem).getByRole('option', { name: /SOI-002｜船舶安全會議/ })).toBeInTheDocument()
+    fireEvent.change(mainCategory, { target: { value: 'SMP' } })
+    expect(mainTopic).toHaveValue('SMP-01')
+    expect(mainItem).toHaveValue('SSOR-001')
+    fireEvent.change(mainTopic, { target: { value: 'SMP-13' } })
+    expect(mainItem).toHaveValue('')
+    expect(within(mainItem).getAllByRole('option')).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '批量增加' }))
+    const batchDialog = screen.getByRole('dialog', { name: '批量增加需求' })
+    const batchCategory = within(batchDialog).getByLabelText('大類')
+    const batchTopic = within(batchDialog).getByLabelText('第一層主題')
+    const batchItem = within(batchDialog).getByLabelText('第二層手冊 / 文件項')
+    expect(batchItem).toHaveValue('SHM-001')
+
+    fireEvent.change(batchTopic, { target: { value: 'SMI-02' } })
+    expect(batchItem).toHaveValue('SOI-001')
+    fireEvent.change(batchCategory, { target: { value: 'SMP' } })
+    expect(batchTopic).toHaveValue('SMP-01')
+    expect(batchItem).toHaveValue('SSOR-001')
+  })
+
   it('opens batch entry and saves two independent requests', async () => {
     render(<App />)
 
