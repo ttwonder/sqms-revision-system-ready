@@ -6,7 +6,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Download, FileSpreadshee
 import './App.css'
 import BatchRequestModal from './BatchRequestModal'
 import DataManagementPanel from './DataManagementPanel'
-import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
+import { catalog, getManualItemOptions, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
 import { createBlankRequest, getNextRequestNo, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
@@ -1160,7 +1160,7 @@ function App() {
               const firstItem = getManualItemOptions(topicCode)[0]
               setForm((current) => ({ ...current, topicCode, manualItemCode: firstItem?.code ?? '' }))
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
-            }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
+            }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code)}</option>)}</select></label>
             <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item, index) => <option key={`${form.topicCode}-${item.code}-${index}`} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
             <label>期望完成日期<input type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
             <label>急迫度<select value={form.urgency} onChange={(e) => updateForm('urgency', e.target.value as Urgency)}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -1460,7 +1460,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
       <select value={filters.requestSource} onChange={(e) => setFilters({ ...filters, requestSource: e.target.value })}><option value="all">全部來源</option>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select>
       <select value={filters.categoryCode} onChange={(e) => setFilters({ ...filters, categoryCode: e.target.value, topicCode: '' })}><option value="">全部大類</option>{catalog.map((c) => <option key={c.code} value={c.code}>{c.code}｜{c.nameZh}</option>)}</select>
-      <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{t.code}｜{t.titleZh}</option>)}</select>
+      <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{getTopicDisplayLabel(t.code)}</option>)}</select>
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.urgency} onChange={(e) => setFilters({ ...filters, urgency: e.target.value as Urgency | 'all' })}><option value="all">全部急迫度</option>{Object.entries(urgencyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <button className="ghost" type="button" onClick={clearFilters}>清除</button>

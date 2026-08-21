@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CheckCircle2, PlusCircle, Save, Trash2 } from 'lucide-react'
-import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
+import { catalog, getManualItemOptions, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
 import { urgencyLabels } from './lib/exporters'
 import type { ChangeRequest, Urgency } from './types'
 
@@ -170,7 +170,7 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
                 <label>需求來源 *<select className={fieldError('requestSource')} value={entry.request.requestSource} onChange={(event) => updateEntry(entry.key, 'requestSource', event.target.value)} disabled={disabled}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
                 <label>申請人 *<input className={fieldError('applicantName')} value={entry.request.applicantName} onChange={(event) => updateEntry(entry.key, 'applicantName', event.target.value)} placeholder="輸入姓名" disabled={disabled} /></label>
                 <label>大類<select value={entry.request.categoryCode} onChange={(event) => changeCategory(entry.key, event.target.value)} disabled={disabled}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
-                <label>第一層主題<select value={entry.request.topicCode} onChange={(event) => changeTopic(entry.key, event.target.value)} disabled={disabled}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{topic.code}｜{topic.titleZh}</option>)}</select></label>
+                <label>第一層主題<select value={entry.request.topicCode} onChange={(event) => changeTopic(entry.key, event.target.value)} disabled={disabled}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code)}</option>)}</select></label>
                 <label>第二層手冊 / 文件項<select value={entry.request.manualItemCode ?? ''} onChange={(event) => updateEntry(entry.key, 'manualItemCode', event.target.value)} disabled={disabled}><option value="">只具體到第一層主題</option>{itemOptions.map((item, itemIndex) => <option key={`${entry.request.topicCode}-${item.code}-${itemIndex}`} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
                 <label>期望完成日期<input type="date" value={entry.request.targetDueDate} onChange={(event) => updateEntry(entry.key, 'targetDueDate', event.target.value)} disabled={disabled} /></label>
                 <label>急迫度<select value={entry.request.urgency} onChange={(event) => updateEntry(entry.key, 'urgency', event.target.value as Urgency)} disabled={disabled}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

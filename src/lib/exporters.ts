@@ -1,5 +1,5 @@
 import type { ChangeRequest } from '../types'
-import { catalog, getManualItem, getTopic } from '../data/sqmsCatalog'
+import { catalog, getManualItem, getTopicDisplayLabel } from '../data/sqmsCatalog'
 
 export const statusLabels = {
   new: '新提出',
@@ -20,8 +20,7 @@ export function getCategoryName(code: string) {
 }
 
 export function getTopicLabel(code?: string) {
-  const topic = getTopic(code)
-  return topic ? `${topic.code} ${topic.titleZh}` : code || ''
+  return getTopicDisplayLabel(code)
 }
 
 export function getItemLabel(topicCode?: string, itemCode?: string) {

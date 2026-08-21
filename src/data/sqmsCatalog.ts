@@ -3769,6 +3769,22 @@ export function getTopic(topicCode?: string): Topic | undefined {
   return catalog.flatMap((category) => category.topics).find((topic) => topic.code === topicCode)
 }
 
+export function getTopicAbbreviation(topicCode?: string): string {
+  const topic = getTopic(topicCode)
+  if (!topic) return topicCode?.match(/^[A-Za-z]+/)?.[0]?.toUpperCase() ?? ''
+  const itemPrefix = topic.items
+    .map((item) => item.code.match(/^[A-Za-z]+/)?.[0]?.toUpperCase())
+    .find(Boolean)
+  return itemPrefix || topic.code.match(/^[A-Za-z]+/)?.[0]?.toUpperCase() || ''
+}
+
+export function getTopicDisplayLabel(topicCode?: string): string {
+  const topic = getTopic(topicCode)
+  if (!topic) return topicCode || ''
+  const abbreviation = getTopicAbbreviation(topic.code)
+  return abbreviation ? `${topic.code}｜${abbreviation}｜${topic.titleZh}` : `${topic.code}｜${topic.titleZh}`
+}
+
 export function getManualItemOptions(topicCode?: string): ManualItem[] {
   return getTopic(topicCode)?.items ?? []
 }
