@@ -5,6 +5,7 @@ import {
 import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import BatchRequestModal from './BatchRequestModal'
+import DataManagementPanel from './DataManagementPanel'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
@@ -1197,9 +1198,8 @@ function App() {
           adminPassword={adminPassword}
           adminProfile={adminProfile}
           currentPerson={currentPerson}
-          filteredRequests={filtered}
+          allRequests={requests}
           canAccessAdminPage={canManagePage}
-          isAdmin={canManagePage}
           isOwner={isOwner}
           requestSourceOptions={requestSourceOptions}
           newRequestSource={newRequestSource}
@@ -1212,11 +1212,7 @@ function App() {
           setNewPerson={setNewPerson}
           onAdminLogin={adminLogin}
           onAdminLogout={handleAdminLogout}
-          onEditRequest={startEdit}
-          onDeleteRequest={handleDelete}
-          onCompleteRequest={setCompletingRequest}
-          onReopenRequest={reopenRequest}
-          onChangeRequestStatus={changeRequestStatus}
+          onDataPurged={() => refresh(false)}
           onAddRequestSource={addRequestSourceOption}
           onRemoveRequestSource={removeRequestSourceOption}
           onAddPersonnel={addPersonnel}
@@ -1279,9 +1275,8 @@ type AdminPanelProps = {
   adminPassword: string
   adminProfile: AdminUser | null
   currentPerson: PersonnelUser | null
-  filteredRequests: ChangeRequest[]
+  allRequests: ChangeRequest[]
   canAccessAdminPage: boolean
-  isAdmin: boolean
   isOwner: boolean
   requestSourceOptions: string[]
   newRequestSource: string
@@ -1294,11 +1289,7 @@ type AdminPanelProps = {
   setNewPerson: (value: { department: string, name: string, username: string, password: string, role: PersonnelRole }) => void
   onAdminLogin: (event: React.FormEvent) => void
   onAdminLogout: () => void
-  onEditRequest: (request: ChangeRequest) => void
-  onDeleteRequest: (request: ChangeRequest) => void
-  onCompleteRequest: (request: ChangeRequest) => void
-  onReopenRequest: (request: ChangeRequest) => void
-  onChangeRequestStatus: (request: ChangeRequest, status: RequestStatus) => void
+  onDataPurged: () => Promise<void> | void
   onAddRequestSource: () => void
   onRemoveRequestSource: (value: string) => void
   onAddPersonnel: () => void
@@ -1308,7 +1299,7 @@ type AdminPanelProps = {
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, filteredRequests, canAccessAdminPage, isAdmin, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onEditRequest, onDeleteRequest, onCompleteRequest, onReopenRequest, onChangeRequestStatus, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, allRequests, canAccessAdminPage, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onDataPurged, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   const managerLabel = adminProfile ? `${adminProfile.email}（${adminProfile.role === 'owner' ? 'Owner' : 'Admin'}）` : currentPerson ? `${currentPerson.department} / ${currentPerson.name}（管理員）` : ''
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{adminProfile && <button className="ghost no-print" onClick={onAdminLogout}>登出 Owner</button>}</div>
@@ -1353,11 +1344,7 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, fi
           <div className="personnel-roster-grid">{personnelDepartments.map((dept) => <div key={dept} className="personnel-dept-row"><div className="dept-name"><b>{dept}</b><span>{personnelRoster[dept]?.length ?? 0} 人</span></div><div className="personnel-row-wrap">{(personnelRoster[dept] ?? []).map((person) => <div key={person.id || `${dept}-${person.name}`} className="personnel-user-row"><input value={person.name} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { name: e.target.value })} aria-label={`${person.name} 姓名`} /><input value={person.username} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { username: e.target.value })} aria-label={`${person.name} 用戶名`} />{isOwner ? <input type="password" value={person.password || ''} onChange={(e) => onUpdatePersonnelDraft(person, { password: e.target.value })} placeholder="密碼" aria-label={`${person.name} 密碼`} /> : <span className="password-hidden">密碼僅 Owner 可見</span>}<select value={person.role} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { role: e.target.value as PersonnelRole })}><option value="operator">操作員</option><option value="admin">管理員</option></select>{isOwner && <><button className="ghost" type="button" onClick={() => onSavePersonnel(person)}>保存</button><button className="danger" type="button" onClick={() => onRemovePersonnel(person)}>停用</button></>}</div>)}</div></div>)}</div>
         </section>
 
-        <section className="admin-card">
-          <div className="section-title compact-title"><div><p className="eyebrow">Requests</p><h3>需求刪除管理</h3></div></div>
-          <p className="subtle">刪除採軟刪除：前台不顯示，資料庫保留刪除時間與刪除人。</p>
-          <RequestTable requests={filteredRequests} isAdmin={isAdmin} onEdit={onEditRequest} onDelete={onDeleteRequest} onComplete={onCompleteRequest} onReopen={onReopenRequest} onStatusChange={onChangeRequestStatus} />
-        </section>
+        <DataManagementPanel requests={allRequests} onPurged={onDataPurged} />
       </div>
     )}
   </section>

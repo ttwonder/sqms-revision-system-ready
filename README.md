@@ -41,16 +41,20 @@ npm run dev
    - 允許網站的匿名 Auth session 修改既有需求內容。
    - 完成、再次修改狀態、其他狀態轉換與刪除仍只允許 Owner／管理員／人員管理員。
    - Migration 可重複執行，不會清除或改寫既有需求。
-7. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
+7. 執行：`supabase/migrations/202608210002_data_management_storage.sql`。
+   - 提供 Owner／管理員空間統計，以及已軟刪除需求的選擇性永久清理。
+   - 安裝 migration 本身不會刪除資料；只有在管理頁人工勾選並再次確認才會清理。
+   - 永久清理只刪除所選軟刪除需求及其事件歷史，正常需求與其他系統資料不受影響。
+8. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
    - 這讓未登入人員也能取得可追蹤的 Auth session，以新增或修改需求；完成、刪除及狀態管理仍須管理員身份。
-8. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
+9. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
    - 預設 owner email 已寫入 SQL：`tuotuoworm@outlook.com`。
    - 如需更換 owner，請先修改 `supabase/schema.sql` 中 `insert into admin_users` 的 email。
-9. 之後可在網站「管理」頁直接維護管理員名單。
+10. 之後可在網站「管理」頁直接維護管理員名單。
    - Owner 可以新增/停用管理員。
    - Admin 可以進入管理界面、完成及刪除需求，但不能維護管理員名單。
    - 不在 `admin_users` 名單中的 Auth 用戶即使有帳號密碼，也會提示無權限。
-10. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
+11. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
 
 > 部署順序必須是：先套用 migration 並啟用 Anonymous Sign-Ins，再部署新版前端。新版前端不會退回匿名直接寫表或整筆 `upsert`。
 

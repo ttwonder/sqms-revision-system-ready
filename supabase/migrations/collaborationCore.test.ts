@@ -8,6 +8,7 @@ const sql = readFileSync(
 )
 const businessDateHotfixUrl = new URL('./202608110001_fix_create_request_business_date.sql', import.meta.url)
 const permissionsMigrationUrl = new URL('./202608210001_guest_edit_admin_lifecycle.sql', import.meta.url)
+const dataManagementMigrationUrl = new URL('./202608210002_data_management_storage.sql', import.meta.url)
 
 describe('collaboration core migration contract', () => {
   it('routes every request mutation through idempotent server commands', () => {
@@ -52,6 +53,23 @@ describe('collaboration core migration contract', () => {
     expect(migrationSql).toContain('if not can_manage_sqms_requests() then')
     expect(migrationSql).toContain('只有管理員可以修改需求狀態')
     expect(migrationSql).toContain('grant execute on function patch_change_request(uuid, uuid, bigint, jsonb) to authenticated')
+  })
+
+  it('ships manager-only storage accounting and exact-set purge contracts', () => {
+    const migrationPath = fileURLToPath(dataManagementMigrationUrl)
+    expect(existsSync(migrationPath)).toBe(true)
+    if (!existsSync(migrationPath)) return
+
+    const migrationSql = readFileSync(migrationPath, 'utf8')
+    expect(migrationSql).toContain('create or replace function get_sqms_storage_stats()')
+    expect(migrationSql).toContain('pg_database_size(current_database())')
+    expect(migrationSql).toContain('pg_total_relation_size')
+    expect(migrationSql).toContain('create or replace function purge_sqms_deleted_requests')
+    expect(migrationSql).toContain('if not can_manage_sqms_requests() then')
+    expect(migrationSql).toContain('DELETED_SET_CHANGED')
+    expect(migrationSql).toContain('delete from request_events')
+    expect(migrationSql).toContain('and request.is_deleted = true')
+    expect(migrationSql).toContain('BATCH_LIMIT_EXCEEDED')
   })
 
   it('blocks direct browser writes and records field overlap history', () => {

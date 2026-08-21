@@ -161,6 +161,8 @@ describe('request manual save flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '管理' }))
     fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
     fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
+    expect(screen.queryByText('需求刪除管理')).not.toBeInTheDocument()
+    expect(screen.getByText('資料與空間管理')).toBeInTheDocument()
 
     for (const tabName of ['統計清單', '待完成', '已完成']) {
       fireEvent.click(screen.getByRole('button', { name: tabName }))
@@ -191,6 +193,31 @@ describe('request manual save flow', () => {
     expect(await screen.findByText(/批量刪除成功：已刪除 3 筆需求/)).toBeInTheDocument()
     const saved = JSON.parse(localStorage.getItem('sqms-change-requests-v1') || '[]')
     expect(saved.every((request: ChangeRequest) => request.isDeleted)).toBe(true)
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces the duplicate admin request table with storage stats and selective purge', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ id: 'keep-active', requestNo: 'SQMS-20260821-41' }),
+      requestFixture({ id: 'purge-deleted', requestNo: 'SQMS-20260821-42', isDeleted: true, deletedAt: '2026-08-21T08:00:00.000Z', deletedBy: 'owner@example.com' }),
+    ]))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    expect(await screen.findByText('SQMS-20260821-41')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
+    fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
+
+    expect(screen.queryByText('需求刪除管理')).not.toBeInTheDocument()
+    expect(screen.getByText('資料與空間管理')).toBeInTheDocument()
+    expect(await screen.findByText('正常需求')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: '選擇永久刪除 SQMS-20260821-42' }))
+    fireEvent.click(screen.getByRole('button', { name: '永久刪除所選（1）' }))
+
+    expect(await screen.findByText(/永久清理完成：1 筆需求、0 筆事件/)).toBeInTheDocument()
+    const saved = JSON.parse(localStorage.getItem('sqms-change-requests-v1') || '[]')
+    expect(saved.map((request: ChangeRequest) => request.id)).toEqual(['keep-active'])
     expect(confirmSpy).toHaveBeenCalledTimes(1)
   })
 
