@@ -4,6 +4,7 @@ import {
 } from 'recharts'
 import { CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
+import BatchRequestModal from './BatchRequestModal'
 import { catalog, getManualItemOptions, getTopicOptions } from './data/sqmsCatalog'
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
@@ -277,6 +278,7 @@ function App() {
   const [personnelLogin, setPersonnelLogin] = useState({ department: personnelDepartments[0], personKey: '', password: '' })
   const [personnelDirty, setPersonnelDirty] = useState(false)
   const [completingRequest, setCompletingRequest] = useState<ChangeRequest | null>(null)
+  const [batchRequestOpen, setBatchRequestOpen] = useState(false)
   const [draftRestored, setDraftRestored] = useState(false)
   const [requestSaving, setRequestSaving] = useState(false)
   const [requestSaveState, setRequestSaveState] = useState<RequestSaveState>(initialRequestSaveState)
@@ -441,6 +443,11 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!currentPerson) return
+    setForm((current) => current.applicantName.trim() ? current : { ...current, applicantName: currentPerson.name })
+  }, [currentPerson])
+
+  useEffect(() => {
     if (!editingId) return
     const remoteRequest = requests.find((request) => request.id === editingId)
     if (!remoteRequest) return
@@ -498,12 +505,16 @@ function App() {
   }
 
   async function blankRequestWithCloudNo() {
-    const blank = createBlankRequest(nextSequence + 1)
+    const blank = { ...createBlankRequest(nextSequence + 1), applicantName: currentPerson?.name ?? '' }
     try {
       return { ...blank, requestNo: await getNextRequestNo() }
     } catch {
       return blank
     }
+  }
+
+  function applyApplicantDefault(person: PersonnelUser) {
+    setForm((current) => current.applicantName.trim() ? current : { ...current, applicantName: person.name })
   }
 
   function updateForm<K extends keyof ChangeRequest>(key: K, value: ChangeRequest[K]) {
@@ -541,6 +552,7 @@ function App() {
       try {
         const sessionPerson = await claimPersonnelSession(supabase, person.id, personnelLogin.password)
         setCurrentPerson(sessionPerson)
+        applyApplicantDefault(sessionPerson)
         setPersonnelLoginOpen(false)
         setPersonnelLogin((current) => ({ ...current, personKey: personKey(person), password: '' }))
         setMessage(`目前人員：${sessionPerson.department} / ${sessionPerson.name}`)
@@ -559,6 +571,7 @@ function App() {
     }
     const sessionPerson = publicPersonSession(person)
     setCurrentPerson(sessionPerson)
+    applyApplicantDefault(sessionPerson)
     localStorage.setItem(personnelSessionKey, JSON.stringify(sessionPerson))
     setPersonnelLoginOpen(false)
     setPersonnelLogin((current) => ({ ...current, personKey: personKey(person), password: '' }))
@@ -588,6 +601,29 @@ function App() {
       return { department, personKey: target ? personKey(target) : '', password: '' }
     })
     setPersonnelLoginOpen(true)
+  }
+
+  function createBatchRequest() {
+    const blank = createBlankRequest(nextSequence + 1)
+    return {
+      ...blank,
+      requestNo: isCloudConfigured ? '儲存後自動產生' : blank.requestNo,
+      applicantName: currentPerson?.name ?? '',
+    }
+  }
+
+  async function saveBatchRequest(request: ChangeRequest) {
+    const saved = await saveRequest(request)
+    setRequests((current) => current.some((item) => item.id === saved.id)
+      ? current.map((item) => item.id === saved.id ? saved : item)
+      : [saved, ...current])
+    return saved
+  }
+
+  function completeBatchRequest(savedRequests: ChangeRequest[]) {
+    setBatchRequestOpen(false)
+    const requestNos = savedRequests.map((request) => request.requestNo).join('、')
+    setMessage(`批量新增成功：已新增 ${savedRequests.length} 筆需求（${requestNos}），每筆均已正式保存${isCloudConfigured ? '並同步雲端' : '在此裝置'}。`)
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -991,7 +1027,10 @@ function App() {
               <p className="eyebrow">Quick Capture</p>
               <h2>{editingId ? '修改既有需求' : '快速新增修改需求'}</h2>
             </div>
-            <button className="ghost no-print" onClick={resetForm}>新增一筆</button>
+            <div className="section-title-actions no-print">
+              <button className="primary" type="button" onClick={() => setBatchRequestOpen(true)}><PlusCircle size={16} />批量增加</button>
+              <button className="ghost" type="button" onClick={resetForm}>新增一筆</button>
+            </div>
           </div>
           <p className="duplicate-search-hint no-print">{duplicateSearchHint}</p>
           <form onSubmit={handleSubmit} className="request-form">
@@ -1083,6 +1122,13 @@ function App() {
         setLogin={setPersonnelLogin}
         onCancel={() => setPersonnelLoginOpen(false)}
         onConfirm={handlePersonnelLogin}
+      />}
+      {batchRequestOpen && <BatchRequestModal
+        requestSourceOptions={requestSourceOptions}
+        createRequest={createBatchRequest}
+        onSave={saveBatchRequest}
+        onCancel={() => setBatchRequestOpen(false)}
+        onComplete={completeBatchRequest}
       />}
       {completingRequest && <CompletionDateModal request={completingRequest} onCancel={() => setCompletingRequest(null)} onConfirm={(date) => completeRequest(completingRequest, date)} />}
     </div>

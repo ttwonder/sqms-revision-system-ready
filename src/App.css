@@ -38,6 +38,7 @@ h3 { margin: 0 0 12px; font-size: 1rem; }
 .message { padding: 10px 14px; border-radius: 14px; background: #fff8d8; border: 1px solid #f4df91; margin-bottom: 12px; color: #735b10; }
 .panel { border: 1px solid var(--line); border-radius: 24px; background: var(--card); box-shadow: var(--shadow); padding: 16px; margin-bottom: 18px; }
 .section-title { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; }
+.section-title-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .request-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; text-align: left; }
 label { display: flex; flex-direction: column; gap: 6px; font-weight: 800; color: #5f536b; font-size: .88rem; }
@@ -182,9 +183,42 @@ tr.overdue td { background: #fff1f2; }
 .identity-login-form { display: grid; gap: 10px; }
 .login-help { margin: 0; padding: 9px 10px; border-radius: 12px; background: #e8f7f1; color: #277056; font-weight: 800; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.batch-backdrop { place-items: stretch center; overflow: hidden; }
+.batch-modal { width: min(1180px, 100%); max-height: calc(100vh - 36px); display: flex; flex-direction: column; overflow: hidden; border-radius: 22px; background: #fff; border: 1px solid var(--line); box-shadow: var(--shadow); }
+.batch-modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #fffafd, #f7fbff); }
+.batch-modal-header h2 { margin: 2px 0 5px; }
+.batch-form { min-height: 0; display: flex; flex: 1; flex-direction: column; }
+.batch-entry-list { min-height: 0; flex: 1; overflow-y: auto; display: grid; gap: 14px; padding: 16px 20px; background: #fffdfd; }
+.batch-entry { padding: 14px; border: 1px solid #eaddeb; border-radius: 18px; background: #fff; }
+.batch-entry.saved { border-color: #86efac; background: #f8fffb; }
+.batch-entry.error { border-color: #fecdd3; background: #fffafb; }
+.batch-entry-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.batch-entry-title h3 { margin: 0 0 5px; font-size: 1rem; }
+.batch-remove { padding: 7px 10px; color: #9f1239; }
+.batch-item-status { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; font-size: .76rem; font-weight: 900; }
+.batch-item-status.success { background: #dcfce7; color: #166534; }
+.batch-item-status.saving { background: #dbeafe; color: #1d4ed8; }
+.batch-item-status.error { border-radius: 10px; background: #ffe4e6; color: #9f1239; }
+.batch-request-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; text-align: left; }
+.batch-request-grid input:disabled, .batch-request-grid select:disabled, .batch-request-grid textarea:disabled { color: #57616f; background: #f8fafc; opacity: 1; }
+.batch-modal-footer { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px 20px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); }
+.batch-summary { color: #526172; font-size: .84rem; font-weight: 800; }
+.batch-summary.error { color: #9f1239; }
+.batch-footer-actions { display: flex; flex-shrink: 0; gap: 8px; justify-content: flex-end; }
 @media (max-width: 760px) {
   .chart-grid.three { grid-template-columns: 1fr; }
   .identity-strip { display: grid; }
   .source-option-form, .personnel-add-row, .personnel-dept-row, .personnel-user-row { grid-template-columns: 1fr; }
   .personnel-row-wrap { grid-template-columns: 1fr; }
+  .section-title { align-items: flex-start; }
+  .section-title-actions { width: 100%; justify-content: flex-end; }
+  .batch-backdrop { padding: 8px; }
+  .batch-modal { max-height: calc(100vh - 16px); border-radius: 16px; }
+  .batch-modal-header { padding: 14px; }
+  .batch-entry-list { padding: 10px; }
+  .batch-request-grid { grid-template-columns: 1fr; }
+  .batch-request-grid .wide, .batch-request-grid .check { grid-column: span 1; }
+  .batch-modal-footer { display: grid; padding: 10px; }
+  .batch-footer-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .batch-footer-actions button { justify-content: center; }
 }

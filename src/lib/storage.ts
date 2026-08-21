@@ -110,10 +110,11 @@ export async function saveRequest(
     return executeIdempotentCommand((operationId) => cloudGateway.create(clean, operationId))
   }
   const existing = await loadRequests()
-  const index = existing.findIndex((item) => item.id === clean.id)
-  const next = index >= 0 ? existing.map((item) => (item.id === clean.id ? clean : item)) : [clean, ...existing]
+  const localRequest = baseRequest ? clean : { ...clean, requestNo: await getNextRequestNo() }
+  const index = existing.findIndex((item) => item.id === localRequest.id)
+  const next = index >= 0 ? existing.map((item) => (item.id === localRequest.id ? localRequest : item)) : [localRequest, ...existing]
   localStorage.setItem(LOCAL_KEY, JSON.stringify(next))
-  return clean
+  return localRequest
 }
 
 export async function updateRequestStatus(id: string, status: ChangeRequest['status'], completionDate?: string): Promise<ChangeRequest> {
