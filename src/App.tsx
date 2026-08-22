@@ -1491,13 +1491,8 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
 }
 
 function RequestTable({ requests, isAdmin, selectionEnabled = false, selectedRequestIds = [], onToggleSelection, onToggleAll, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], isAdmin: boolean, selectionEnabled?: boolean, selectedRequestIds?: string[], onToggleSelection?: (requestId: string) => void, onToggleAll?: () => void, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
-  const [sort, setSort] = useState<RequestSort | null>(null)
-  const sorted = [...requests].sort((a, b) => {
-    if (sort) return compareRequests(a, b, sort)
-    const overdueDiff = Number(isOverdue(b)) - Number(isOverdue(a))
-    if (overdueDiff) return overdueDiff
-    return a.targetDueDate.localeCompare(b.targetDueDate)
-  })
+  const [sort, setSort] = useState<RequestSort>({ key: 'requestNo', direction: 'desc' })
+  const sorted = [...requests].sort((a, b) => compareRequests(a, b, sort))
   const allSelected = requests.length > 0 && requests.every((request) => selectedRequestIds.includes(request.id))
   const someSelected = requests.some((request) => selectedRequestIds.includes(request.id))
   const changeSort = (key: RequestSortKey) => {

@@ -252,6 +252,28 @@ describe('request manual save flow', () => {
     expect(new Set(saved.map((item: { requestNo: string }) => item.requestNo)).size).toBe(2)
   })
 
+  it('defaults all, pending, and completed lists to newest request number first', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ requestNo: 'SQMS-20260820-01', createdAt: '2026-08-20T00:00:00.000Z', status: 'new' }),
+      requestFixture({ requestNo: 'SQMS-20260821-02', createdAt: '2026-08-21T00:00:00.000Z', status: 'completed', completionDate: '2026-08-21' }),
+      requestFixture({ requestNo: 'SQMS-20260822-03', createdAt: '2026-08-22T00:00:00.000Z', status: 'processing' }),
+      requestFixture({ requestNo: 'SQMS-20260823-04', createdAt: '2026-08-23T00:00:00.000Z', status: 'completed', completionDate: '2026-08-23' }),
+    ]))
+    render(<App />)
+
+    const displayedRequestNos = () => within(screen.getByRole('table')).getAllByRole('row').slice(1).map((row) => row.querySelector('td:nth-child(3) b')?.textContent)
+    const expectations: Array<[string, string[]]> = [
+      ['統計清單', ['SQMS-20260823-04', 'SQMS-20260822-03', 'SQMS-20260821-02', 'SQMS-20260820-01']],
+      ['待完成', ['SQMS-20260822-03', 'SQMS-20260820-01']],
+      ['已完成', ['SQMS-20260823-04', 'SQMS-20260821-02']],
+    ]
+    for (const [tabName, expected] of expectations) {
+      fireEvent.click(screen.getByRole('button', { name: tabName }))
+      await waitFor(() => expect(displayedRequestNos()).toEqual(expected))
+      expect(within(screen.getByRole('table')).getByRole('button', { name: '編號' }).closest('th')).toHaveAttribute('aria-sort', 'descending')
+    }
+  })
+
   it('sorts the shared request table from clickable headers in all three list tabs', async () => {
     localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
       requestFixture({ requestNo: 'SQMS-20260821-03', applicantName: '王三', requestSource: '安全會議', topicCode: 'SMI-03', targetDueDate: '', urgency: 'high', status: 'processing' }),
