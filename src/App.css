@@ -78,6 +78,9 @@ input.field-error, select.field-error, textarea.field-error { border-color: #fb7
 .kpi.mint { background: var(--mint); } .kpi.blue { background: var(--blue); } .kpi.purple { background: var(--purple); } .kpi.pink { background: var(--pink); } .kpi.yellow { background: var(--yellow); } .kpi.green { background: #d0f4de; } .kpi.orange { background: #ffd6a5; }
 .chart-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
 .chart-card { border: 1px solid var(--line); border-radius: 20px; padding: 14px; background: #fff; }
+.chart-card .recharts-legend-wrapper { font-size: .8rem; font-weight: 800; }
+.chart-card .recharts-pie-label-text, .chart-card .dashboard-pie-label { fill: #54485f; font-size: .72rem; font-weight: 900; }
+.chart-card .recharts-label-list text { font-size: .75rem; font-weight: 900; }
 
 .table-wrap { overflow-x: auto; border-radius: 18px; border: 1px solid var(--line); }
 .request-table { width: 100%; border-collapse: collapse; min-width: 1160px; background: #fff; table-layout: fixed; }

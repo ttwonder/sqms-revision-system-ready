@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
+import type { PieLabelRenderProps } from 'recharts'
 import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import BatchRequestModal from './BatchRequestModal'
 import DataManagementPanel from './DataManagementPanel'
 import { catalog, getManualItemOptions, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
 import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
+import { buildTopicChartData, pieNameValueLabel } from './lib/chartPresentation'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
 import { createBlankRequest, getNextRequestNo, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
 import { buildRequestPatch, reconcileRequestWithPendingPatch } from './lib/collaboration'
@@ -32,6 +34,22 @@ type Filters = {
 
 const emptyFilters: Filters = { from: '', to: '', categoryCode: '', topicCode: '', status: 'all', urgency: 'all', requestSource: 'all' }
 const chartColors = ['#b8e0d2', '#f7c6c7', '#cdb4db', '#a2d2ff', '#ffd6a5', '#fdffb6', '#d0f4de']
+const PIE_LABEL_MAX_CHARS = 7
+const PIE_LABEL_RADIAN = Math.PI / 180
+
+function renderDashboardPieLabel({ cx, cy, midAngle = 0, outerRadius = 0, name, value }: PieLabelRenderProps) {
+  const centerX = Number(cx)
+  const centerY = Number(cy)
+  const radius = Number(outerRadius) + 14
+  const x = centerX + radius * Math.cos(-midAngle * PIE_LABEL_RADIAN)
+  const y = centerY + radius * Math.sin(-midAngle * PIE_LABEL_RADIAN)
+  const nameText = String(name ?? '')
+  const lines = nameText.length > PIE_LABEL_MAX_CHARS
+    ? [nameText.slice(0, PIE_LABEL_MAX_CHARS), pieNameValueLabel({ name: nameText.slice(PIE_LABEL_MAX_CHARS), value })]
+    : [pieNameValueLabel({ name: nameText, value })]
+  return <text className="dashboard-pie-label" x={x} y={y} textAnchor={x > centerX ? 'start' : 'end'}>{lines.map((line, index) => <tspan key={`${line}-${index}`} x={x} dy={index === 0 ? (lines.length > 1 ? '-0.1em' : '0.35em') : '1.1em'}>{line}</tspan>)}</text>
+}
+
 const duplicateSearchHint = '提出新需求前，請搜索是否類似需求已被提出。'
 const personnelDepartments = ['管理層', '管理組', '資材組', '營業處', '船工處', '安衛處', '航運處', '督導', '船員組', '航運組', '海技組']
 const defaultPersonnel: Record<string, PersonnelUser[]> = {
@@ -1246,7 +1264,7 @@ function App() {
 
 function Dashboard({ stats, filters, setFilters, loading, onRefresh, requestSourceOptions }: { stats: ReturnType<typeof buildDashboardStats>, filters: Filters, setFilters: (f: Filters) => void, loading: boolean, onRefresh: () => void, requestSourceOptions: string[] }) {
   const categoryData = Object.entries(stats.byCategory).map(([name, value]) => ({ name, value }))
-  const topicData = Object.entries(stats.byTopic).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name, value }))
+  const topicData = buildTopicChartData(stats.byTopic)
   const sourceData = Object.entries(stats.byRequestSource).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }))
   return <section className="panel dashboard-panel">
     <ListHeader title="狀態 Dashboard" filters={filters} setFilters={setFilters} requests={[]} onRefresh={onRefresh} hideExports requestSourceOptions={requestSourceOptions} />
@@ -1260,10 +1278,10 @@ function Dashboard({ stats, filters, setFilters, loading, onRefresh, requestSour
       <Kpi label="待完成" value={stats.pending} tone="yellow" />
     </div>
     {loading ? <p>讀取中...</p> : <div className="chart-grid three">
-      <div className="chart-card"><h3>需求來源分佈</h3><ResponsiveContainer width="100%" height={230}><PieChart><Pie data={sourceData} dataKey="value" nameKey="name" outerRadius={82} label>{sourceData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
-      <div className="chart-card"><h3>需求來源柱狀圖</h3><ResponsiveContainer width="100%" height={230}><BarChart data={sourceData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#cdb4db" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></div>
-      <div className="chart-card"><h3>第一層主題 Top 8</h3><ResponsiveContainer width="100%" height={230}><BarChart data={topicData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="value" fill="#a2d2ff" radius={[8, 8, 0, 0]} /></BarChart></ResponsiveContainer></div>
-      <div className="chart-card"><h3>各大類分佈</h3><ResponsiveContainer width="100%" height={230}><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={82} label>{categoryData.map((_, index) => <Cell key={index} fill={chartColors[(index + 2) % chartColors.length]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div>
+      <div className="chart-card"><h3>需求來源分佈</h3><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={sourceData} dataKey="value" nameKey="name" outerRadius={70} label={renderDashboardPieLabel} labelLine>{sourceData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}</Pie><Tooltip /><Legend verticalAlign="bottom" height={42} /></PieChart></ResponsiveContainer></div>
+      <div className="chart-card"><h3>需求來源柱狀圖</h3><ResponsiveContainer width="100%" height={280}><BarChart data={sourceData} margin={{ top: 18, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Legend verticalAlign="top" height={30} /><Bar dataKey="value" name="需求數量" fill="#cdb4db" radius={[8, 8, 0, 0]}><LabelList dataKey="value" position="top" fill="#5f536b" /></Bar></BarChart></ResponsiveContainer></div>
+      <div className="chart-card"><h3>第一層主題 Top 8</h3><ResponsiveContainer width="100%" height={280}><BarChart data={topicData} margin={{ top: 18, right: 12, left: 0, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 800 }} /><YAxis allowDecimals={false} /><Tooltip labelFormatter={(label, payload) => payload?.[0]?.payload?.fullName || label} /><Legend verticalAlign="top" height={30} /><Bar dataKey="value" name="需求數量" fill="#a2d2ff" radius={[8, 8, 0, 0]}><LabelList dataKey="value" position="top" fill="#425b73" /></Bar></BarChart></ResponsiveContainer></div>
+      <div className="chart-card"><h3>各大類分佈</h3><ResponsiveContainer width="100%" height={280}><PieChart><Pie data={categoryData} dataKey="value" nameKey="name" outerRadius={70} label={renderDashboardPieLabel} labelLine>{categoryData.map((_, index) => <Cell key={index} fill={chartColors[(index + 2) % chartColors.length]} />)}</Pie><Tooltip /><Legend verticalAlign="bottom" height={42} /></PieChart></ResponsiveContainer></div>
     </div>}
   </section>
 }
