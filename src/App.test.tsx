@@ -91,6 +91,29 @@ describe('request manual save flow', () => {
     expect(within(batchDialog).getByLabelText('申請人 *')).toHaveValue('呂學修副總')
   })
 
+  it('shows Owner identity in Current User and prevents layered personnel login', async () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.change(screen.getByLabelText('管理員帳號 / Email'), { target: { value: 'owner@example.com' } })
+    fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
+    fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
+
+    const identity = screen.getByRole('region', { name: '目前人員身份' })
+    expect(within(identity).getByText('owner@example.com')).toBeInTheDocument()
+    expect(within(identity).getByText('Owner')).toBeInTheDocument()
+    expect(within(identity).queryByText('未登入人員')).not.toBeInTheDocument()
+    expect(within(identity).queryByRole('button', { name: '人員登入 / 切換' })).not.toBeInTheDocument()
+    expect(within(identity).getByRole('button', { name: '登出 Owner' })).toBeEnabled()
+    expect(screen.getAllByRole('button', { name: '登出 Owner' })).toHaveLength(1)
+    expect(screen.queryByText(/已登入：owner@example.com/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/本機展示模式管理員已登入/)).not.toBeInTheDocument()
+
+    fireEvent.click(within(identity).getByRole('button', { name: '登出 Owner' }))
+    await waitFor(() => expect(within(identity).getByText('未登入人員')).toBeInTheDocument())
+    expect(within(identity).getByRole('button', { name: '人員登入 / 切換' })).toBeEnabled()
+    expect(localStorage.getItem('sqms-current-personnel-v1')).toBeNull()
+  })
+
   it('cascades category and topic changes into the first matching manual item', async () => {
     render(<App />)
 

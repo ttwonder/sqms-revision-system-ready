@@ -1005,6 +1005,7 @@ function App() {
     await supabase?.auth.signOut()
     setAdminProfile(null)
     setCurrentPerson(null)
+    localStorage.removeItem(personnelSessionKey)
     setAdminPassword('')
     if (supabase) {
       try { await ensureCloudSession(supabase) } catch { /* 下一次操作會再次嘗試建立工作階段。 */ }
@@ -1021,17 +1022,20 @@ function App() {
         return
       }
       setCurrentPerson(null)
+      localStorage.removeItem(personnelSessionKey)
       try {
-        const profile = await acceptAdminSession(data.user.email ?? adminEmail)
-        setMessage(`管理員已登入：${profile.email}（${profile.role}）`)
+        await acceptAdminSession(data.user.email ?? adminEmail)
+        setMessage('')
       } catch (permissionError) {
         setMessage(permissionError instanceof Error ? permissionError.message : '無權限：此帳號不是管理員。')
       }
       return
     }
     if (adminPassword === 'SQMS-ADMIN') {
+      setCurrentPerson(null)
+      localStorage.removeItem(personnelSessionKey)
       setAdminProfile({ id: 'local-owner', email: adminEmail || 'local-owner', role: 'owner', active: true, createdAt: '', updatedAt: '' })
-      setMessage('本機展示模式管理員已登入。正式上線請使用 Supabase Auth。')
+      setMessage('')
     } else {
       setMessage('本機展示密碼錯誤。正式上線後使用 Supabase 管理員帳號。')
     }
@@ -1129,12 +1133,22 @@ function App() {
       <section className="identity-strip no-print" aria-label="目前人員身份">
         <div>
           <p className="eyebrow">Current User</p>
-          {currentPerson ? <strong>{currentPerson.department} / {currentPerson.name}</strong> : <strong>未登入人員</strong>}
-          <span className="subtle">未登入仍可新增與修改需求；完成、刪除及狀態管理僅限管理員。</span>
+          {adminProfile ? <>
+            <div className="identity-current-line"><strong>{adminProfile.email}</strong><span className={`role-pill ${adminProfile.role}`}>{adminProfile.role === 'owner' ? 'Owner' : '管理員'}</span></div>
+            <span className="subtle">目前以 {adminProfile.role === 'owner' ? 'Owner' : '管理員'} 身份登入；可修改、完成、刪除及管理需求。</span>
+          </> : currentPerson ? <>
+            <strong>{currentPerson.department} / {currentPerson.name}</strong>
+            <span className="subtle">目前為{currentPerson.role === 'admin' ? '人員管理員' : '一般人員'}身份；可新增與修改需求。</span>
+          </> : <>
+            <strong>未登入人員</strong>
+            <span className="subtle">未登入仍可新增與修改需求；完成、刪除及狀態管理僅限管理員。</span>
+          </>}
         </div>
         <div className="identity-actions">
-          <button className="primary" type="button" onClick={openPersonnelLogin}>人員登入 / 切換</button>
-          {currentPerson && <button className="ghost" type="button" onClick={logoutPersonnel}>退出身份</button>}
+          {adminProfile ? <button className="ghost" type="button" onClick={handleAdminLogout}>登出 {adminProfile.role === 'owner' ? 'Owner' : '管理員'}</button> : <>
+            <button className="primary" type="button" onClick={openPersonnelLogin}>人員登入 / 切換</button>
+            {currentPerson && <button className="ghost" type="button" onClick={logoutPersonnel}>退出身份</button>}
+          </>}
         </div>
       </section>
 
@@ -1214,8 +1228,6 @@ function App() {
         <AdminPanel
           adminEmail={adminEmail}
           adminPassword={adminPassword}
-          adminProfile={adminProfile}
-          currentPerson={currentPerson}
           allRequests={requests}
           canAccessAdminPage={canManagePage}
           isOwner={isOwner}
@@ -1229,7 +1241,6 @@ function App() {
           setNewRequestSource={setNewRequestSource}
           setNewPerson={setNewPerson}
           onAdminLogin={adminLogin}
-          onAdminLogout={handleAdminLogout}
           onDataPurged={() => refresh(false)}
           onAddRequestSource={addRequestSourceOption}
           onRemoveRequestSource={removeRequestSourceOption}
@@ -1291,8 +1302,6 @@ function Kpi({ label, value, tone }: { label: string, value: string | number, to
 type AdminPanelProps = {
   adminEmail: string
   adminPassword: string
-  adminProfile: AdminUser | null
-  currentPerson: PersonnelUser | null
   allRequests: ChangeRequest[]
   canAccessAdminPage: boolean
   isOwner: boolean
@@ -1306,7 +1315,6 @@ type AdminPanelProps = {
   setNewRequestSource: (value: string) => void
   setNewPerson: (value: { department: string, name: string, username: string, password: string, role: PersonnelRole }) => void
   onAdminLogin: (event: React.FormEvent) => void
-  onAdminLogout: () => void
   onDataPurged: () => Promise<void> | void
   onAddRequestSource: () => void
   onRemoveRequestSource: (value: string) => void
@@ -1317,10 +1325,9 @@ type AdminPanelProps = {
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, allRequests, canAccessAdminPage, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onAdminLogout, onDataPurged, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
-  const managerLabel = adminProfile ? `${adminProfile.email}（${adminProfile.role === 'owner' ? 'Owner' : 'Admin'}）` : currentPerson ? `${currentPerson.department} / ${currentPerson.name}（管理員）` : ''
+function AdminPanel({ adminEmail, adminPassword, allRequests, canAccessAdminPage, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onDataPurged, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
   return <section className="panel admin-panel">
-    <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div>{adminProfile && <button className="ghost no-print" onClick={onAdminLogout}>登出 Owner</button>}</div>
+    <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div></div>
     {!canAccessAdminPage ? (
       <div className="permission-card">
         <p className="subtle">操作員不能進入管理頁面。請使用角色為「管理員」的人員身份，或由 Owner 在此登入。</p>
@@ -1332,12 +1339,6 @@ function AdminPanel({ adminEmail, adminPassword, adminProfile, currentPerson, al
       </div>
     ) : (
       <div className="admin-stack">
-        <div className="admin-status">
-          <strong>已登入：{managerLabel}</strong>
-          <span className={`role-pill ${isOwner ? 'owner' : 'admin'}`}>{isOwner ? 'Owner' : 'Admin'}</span>
-          <span className="subtle">管理員可維護需求來源、人員名單與需求資料；只有 Owner 可修改人員用戶名、密碼、角色或停用人員。</span>
-        </div>
-
         <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Request Sources</p><h3>需求來源項目管理</h3></div></div>
           <div className="source-option-form">
