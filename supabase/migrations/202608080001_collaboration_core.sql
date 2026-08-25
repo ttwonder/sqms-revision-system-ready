@@ -579,9 +579,9 @@ declare
     'scope_note','suggested_change','change_reason','target_due_date','urgency',
     'need_related_form_update','reference_materials','remarks','public_edit_note'
   ]::text[];
-  changed_fields text[];
+  patch_changed_fields text[];
   unknown_fields text[];
-  overlap_fields text[];
+  detected_overlap_fields text[];
   actor_personnel_id uuid := current_sqms_personnel_id();
 begin
   if not can_edit_sqms_requests() then
@@ -611,14 +611,14 @@ begin
     raise exception '修改資料格式錯誤';
   end if;
 
-  select coalesce(array_agg(field_name order by field_name), '{}'::text[])
-  into changed_fields
+  select coalesce(array_agg(fields.field_name order by fields.field_name), '{}'::text[])
+  into patch_changed_fields
   from jsonb_object_keys(p_patch) as fields(field_name);
 
-  select coalesce(array_agg(field_name order by field_name), '{}'::text[])
+  select coalesce(array_agg(fields.field_name order by fields.field_name), '{}'::text[])
   into unknown_fields
-  from unnest(changed_fields) as fields(field_name)
-  where not field_name = any(allowed_fields);
+  from unnest(patch_changed_fields) as fields(field_name)
+  where not fields.field_name = any(allowed_fields);
 
   if cardinality(unknown_fields) > 0 then
     raise exception '不允許修改欄位：%', array_to_string(unknown_fields, ', ');
@@ -655,17 +655,17 @@ begin
     raise exception '急迫度不正確';
   end if;
 
-  select coalesce(array_agg(distinct field_name order by field_name), '{}'::text[])
-  into overlap_fields
+  select coalesce(array_agg(distinct event_fields.field_name order by event_fields.field_name), '{}'::text[])
+  into detected_overlap_fields
   from request_events event
   cross join unnest(event.changed_fields) as event_fields(field_name)
   where event.request_id = p_request_id
     and event.revision > coalesce(p_base_revision, 0)
-    and field_name = any(changed_fields);
+    and event_fields.field_name = any(patch_changed_fields);
 
   before_snapshot := to_jsonb(current_request);
 
-  if cardinality(changed_fields) = 0 then
+  if cardinality(patch_changed_fields) = 0 then
     insert into request_events (
       operation_id, request_id, revision, base_revision, event_type,
       changed_fields, overlap_fields, before_snapshot, after_snapshot,
@@ -708,7 +708,7 @@ begin
   )
   values (
     p_operation_id, saved.id, saved.revision, p_base_revision, 'patched',
-    changed_fields, overlap_fields, before_snapshot, to_jsonb(saved),
+    patch_changed_fields, detected_overlap_fields, before_snapshot, to_jsonb(saved),
     auth.uid(), actor_personnel_id, current_sqms_actor_label()
   );
 

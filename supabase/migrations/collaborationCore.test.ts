@@ -9,6 +9,7 @@ const sql = readFileSync(
 const businessDateHotfixUrl = new URL('./202608110001_fix_create_request_business_date.sql', import.meta.url)
 const permissionsMigrationUrl = new URL('./202608210001_guest_edit_admin_lifecycle.sql', import.meta.url)
 const dataManagementMigrationUrl = new URL('./202608210002_data_management_storage.sql', import.meta.url)
+const patchFieldsHotfixUrl = new URL('./202608250001_fix_patch_changed_fields_ambiguity.sql', import.meta.url)
 
 describe('collaboration core migration contract', () => {
   it('routes every request mutation through idempotent server commands', () => {
@@ -29,6 +30,15 @@ describe('collaboration core migration contract', () => {
     expect(sql).toContain("array['status','completion_date']")
   })
 
+  it('disambiguates patch field variables from request event columns', () => {
+    expect(sql).toContain('patch_changed_fields text[];')
+    expect(sql).toContain('detected_overlap_fields text[];')
+    expect(sql).toContain('from unnest(patch_changed_fields)')
+    expect(sql).toContain('event_fields.field_name = any(patch_changed_fields)')
+    expect(sql).not.toMatch(/^\s*changed_fields text\[\];/m)
+    expect(sql).not.toMatch(/\bany\(changed_fields\)/)
+  })
+
   it('ships a rerunnable production hotfix for the ambiguous business date reference', () => {
     const hotfixPath = fileURLToPath(businessDateHotfixUrl)
     expect(existsSync(hotfixPath)).toBe(true)
@@ -39,6 +49,22 @@ describe('collaboration core migration contract', () => {
     expect(hotfixSql).toContain('request_business_date date :=')
     expect(hotfixSql).toContain('values (request_business_date, 1, now())')
     expect(hotfixSql).not.toMatch(/\bbusiness_date date :=/)
+  })
+
+  it('ships a rerunnable production hotfix for the ambiguous changed_fields reference', () => {
+    const hotfixPath = fileURLToPath(patchFieldsHotfixUrl)
+    expect(existsSync(hotfixPath)).toBe(true)
+    if (!existsSync(hotfixPath)) return
+
+    const hotfixSql = readFileSync(hotfixPath, 'utf8')
+    expect(hotfixSql).toContain('create or replace function patch_change_request')
+    expect(hotfixSql).toContain('patch_changed_fields text[];')
+    expect(hotfixSql).toContain('detected_overlap_fields text[];')
+    expect(hotfixSql).toContain('event_fields.field_name = any(patch_changed_fields)')
+    expect(hotfixSql).not.toMatch(/^\s*changed_fields text\[\];/m)
+    expect(hotfixSql).not.toMatch(/\bany\(changed_fields\)/)
+    expect(hotfixSql).toContain('revoke all on function patch_change_request(uuid, uuid, bigint, jsonb) from public')
+    expect(hotfixSql).toContain('grant execute on function patch_change_request(uuid, uuid, bigint, jsonb) to authenticated')
   })
 
   it('ships a rerunnable permission migration for guest edits and manager-only lifecycle changes', () => {
