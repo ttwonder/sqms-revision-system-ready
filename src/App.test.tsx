@@ -275,6 +275,38 @@ describe('request manual save flow', () => {
     expect(new Set(saved.map((item: { requestNo: string }) => item.requestNo)).size).toBe(2)
   })
 
+  it('renders distinct semantic colors for every request status and urgency', async () => {
+    const toneCases = [
+      { id: 'tone-new', requestNo: 'SQMS-20260821-01', status: 'new', urgency: 'urgent', statusLabel: '新提出', urgencyLabel: '盡快' },
+      { id: 'tone-processing', requestNo: 'SQMS-20260821-02', status: 'processing', urgency: 'high', statusLabel: '處理中', urgencyLabel: '高' },
+      { id: 'tone-completed', requestNo: 'SQMS-20260821-03', status: 'completed', urgency: 'medium', statusLabel: '已完成', urgencyLabel: '中', completionDate: '2026-08-21' },
+      { id: 'tone-cancelled', requestNo: 'SQMS-20260821-04', status: 'cancelled', urgency: 'low', statusLabel: '取消 / 不採納', urgencyLabel: '低' },
+    ] as const
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify(toneCases.map((item) => requestFixture(item))))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+
+    await waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row').slice(1)).toHaveLength(4))
+    const findRow = (requestNo: string) => within(screen.getByRole('table')).getAllByRole('row').find((row) => row.textContent?.includes(requestNo))
+    for (const toneCase of toneCases) {
+      const row = findRow(toneCase.requestNo)
+      expect(row).toBeDefined()
+      expect(row?.querySelector(`.status.${toneCase.status}`)).toHaveTextContent(toneCase.statusLabel)
+      expect(row?.querySelector(`.urgency.${toneCase.urgency}`)).toHaveTextContent(toneCase.urgencyLabel)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
+    fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
+    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+
+    for (const toneCase of toneCases) {
+      const row = findRow(toneCase.requestNo)
+      expect(within(row as HTMLElement).getByRole('combobox', { name: `${toneCase.requestNo} 狀態` })).toHaveClass('status-select', toneCase.status)
+      expect(row?.querySelector(`.urgency.${toneCase.urgency}`)).toHaveTextContent(toneCase.urgencyLabel)
+    }
+  })
+
   it('defaults all, pending, and completed lists to newest request number first', async () => {
     localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
       requestFixture({ requestNo: 'SQMS-20260820-01', createdAt: '2026-08-20T00:00:00.000Z', status: 'new' }),
