@@ -1049,7 +1049,7 @@ function App() {
     setTab('admin')
   }
 
-  const activeListTitle = tab === 'pending' ? '待完成清單' : tab === 'completed' ? '已完成清單' : '統計清單'
+  const activeListTitle = tab === 'pending' ? '待完成清單' : tab === 'completed' ? '已完成清單' : '總清單'
   const listForActiveTab = tab === 'pending' ? pending : tab === 'completed' ? completed : searched
   const activeRequestIds = listForActiveTab.map((request) => request.id)
   const selectedRequestsForActiveList = listForActiveTab.filter((request) => selectedRequestIds.includes(request.id))
@@ -1155,7 +1155,7 @@ function App() {
       <nav className="nav-tabs no-print" aria-label="主功能">
         <button className={tab === 'form' ? 'active' : ''} onClick={() => setTab('form')}><PlusCircle size={16} /> 新增/修改</button>
         <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}><LayoutDashboard size={16} /> Dashboard</button>
-        <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>統計清單</button>
+        <button className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>總清單</button>
         <button className={tab === 'pending' ? 'active' : ''} onClick={() => setTab('pending')}>待完成</button>
         <button className={tab === 'completed' ? 'active' : ''} onClick={() => setTab('completed')}>已完成</button>
         <button className={tab === 'admin' ? 'active' : ''} onClick={openAdminTab}><Lock size={16} /> 管理</button>

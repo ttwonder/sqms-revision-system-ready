@@ -150,7 +150,7 @@ describe('request manual save flow', () => {
       requestFixture({ id: 'guest-edit', requestNo: 'SQMS-20260821-11', remarks: '' }),
     ]))
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
 
     const table = await screen.findByRole('table')
     fireEvent.click(within(table).getByRole('button', { name: '修改' }))
@@ -171,7 +171,7 @@ describe('request manual save flow', () => {
     ]))
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
 
     let table = await screen.findByRole('table')
     expect(within(table).getAllByRole('button', { name: '修改' })).toHaveLength(3)
@@ -187,14 +187,14 @@ describe('request manual save flow', () => {
     expect(screen.queryByText('需求刪除管理')).not.toBeInTheDocument()
     expect(screen.getByText('資料與空間管理')).toBeInTheDocument()
 
-    for (const tabName of ['統計清單', '待完成', '已完成']) {
+    for (const tabName of ['總清單', '待完成', '已完成']) {
       fireEvent.click(screen.getByRole('button', { name: tabName }))
       const tabTable = screen.getByRole('table')
       expect(within(tabTable).getByRole('checkbox', { name: '全選目前清單' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /批量完成/ })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /批量刪除/ })).toBeInTheDocument()
     }
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
 
     table = screen.getByRole('table')
     expect(within(table).getAllByRole('button', { name: '修改' })).toHaveLength(3)
@@ -226,7 +226,7 @@ describe('request manual save flow', () => {
     ]))
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
     expect(await screen.findByText('SQMS-20260821-41')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '管理' }))
     fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
@@ -284,7 +284,7 @@ describe('request manual save flow', () => {
     ] as const
     localStorage.setItem('sqms-change-requests-v1', JSON.stringify(toneCases.map((item) => requestFixture(item))))
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
 
     await waitFor(() => expect(within(screen.getByRole('table')).getAllByRole('row').slice(1)).toHaveLength(4))
     const findRow = (requestNo: string) => within(screen.getByRole('table')).getAllByRole('row').find((row) => row.textContent?.includes(requestNo))
@@ -298,7 +298,7 @@ describe('request manual save flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '管理' }))
     fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
     fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
 
     for (const toneCase of toneCases) {
       const row = findRow(toneCase.requestNo)
@@ -318,7 +318,7 @@ describe('request manual save flow', () => {
 
     const displayedRequestNos = () => within(screen.getByRole('table')).getAllByRole('row').slice(1).map((row) => row.querySelector('td:nth-child(3) b')?.textContent)
     const expectations: Array<[string, string[]]> = [
-      ['統計清單', ['SQMS-20260823-04', 'SQMS-20260822-03', 'SQMS-20260821-02', 'SQMS-20260820-01']],
+      ['總清單', ['SQMS-20260823-04', 'SQMS-20260822-03', 'SQMS-20260821-02', 'SQMS-20260820-01']],
       ['待完成', ['SQMS-20260822-03', 'SQMS-20260820-01']],
       ['已完成', ['SQMS-20260823-04', 'SQMS-20260821-02']],
     ]
@@ -336,7 +336,7 @@ describe('request manual save flow', () => {
       requestFixture({ requestNo: 'SQMS-20260821-02', applicantName: '陳二', requestSource: '內部檢查', topicCode: 'SMI-02', targetDueDate: '2026-08-25', urgency: 'urgent', status: 'new' }),
     ]))
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: '統計清單' }))
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
 
     const displayedRequestNos = () => within(screen.getByRole('table')).getAllByRole('row').slice(1).map((row) => row.querySelector('td:nth-child(3) b')?.textContent)
     await waitFor(() => expect(displayedRequestNos()).toHaveLength(3))
