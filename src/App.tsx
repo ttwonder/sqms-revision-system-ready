@@ -6,9 +6,10 @@ import type { PieLabelRenderProps } from 'recharts'
 import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Download, FileSpreadsheet, LayoutDashboard, Lock, PlusCircle, Printer, RefreshCw, Save, Trash2, UserPlus } from 'lucide-react'
 import './App.css'
 import BatchRequestModal from './BatchRequestModal'
+import CatalogManagementPanel from './CatalogManagementPanel'
 import DataManagementPanel from './DataManagementPanel'
-import { catalog, getManualItemOptions, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
-import type { AdminUser, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
+import { getCategoryOptions, getManualItem, getManualItemOptions, getTopic, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
+import type { AdminUser, CatalogCategory, ChangeRequest, PersonnelRole, PersonnelUser, RequestStatus, Urgency } from './types'
 import { buildTopicChartData, pieNameValueLabel } from './lib/chartPresentation'
 import { buildDashboardStats, filterRequests, isOverdue, isPending } from './lib/stats'
 import { createBlankRequest, getNextRequestNo, loadRequests, saveRequest, softDeleteRequest, updateRequestStatus } from './lib/storage'
@@ -19,6 +20,8 @@ import { addSharedRequestSource, loadSharedRequestSources, removeSharedRequestSo
 import { clearRequestDraft, loadRequestDraft, saveRequestDraft } from './lib/requestDraft'
 import { exportCsv, exportExcel, getCategoryName, getItemLabel, getTopicLabel, statusLabels, urgencyLabels } from './lib/exporters'
 import { fromDbAdminUser, fromDbPersonnelUser, isCloudConfigured, supabase } from './lib/supabaseClient'
+import { createBuiltInCatalog, loadSharedCatalog } from './lib/sharedCatalog'
+import type { CatalogLoadResult } from './lib/sharedCatalog'
 
 type Tab = 'form' | 'dashboard' | 'all' | 'pending' | 'completed' | 'admin'
 
@@ -184,7 +187,7 @@ const defaultPersonnel: Record<string, PersonnelUser[]> = {
 const personnelStorageKey = 'sqms-personnel-roster-v2'
 const personnelSessionKey = 'sqms-current-personnel-v1'
 
-function requestMatchesSearch(request: ChangeRequest, query: string) {
+function requestMatchesSearch(request: ChangeRequest, query: string, catalogData: CatalogCategory[]) {
   const keyword = query.trim().toLowerCase()
   if (!keyword) return true
   const text = [
@@ -192,11 +195,11 @@ function requestMatchesSearch(request: ChangeRequest, query: string) {
     request.requestSource,
     request.applicantName,
     request.categoryCode,
-    getCategoryName(request.categoryCode),
+    getCategoryName(request.categoryCode, catalogData),
     request.topicCode,
-    getTopicLabel(request.topicCode),
+    getTopicLabel(request.topicCode, catalogData),
     request.manualItemCode,
-    getItemLabel(request.topicCode, request.manualItemCode),
+    getItemLabel(request.topicCode, request.manualItemCode, catalogData),
     request.scopeNote,
     request.suggestedChange,
     request.changeReason,
@@ -314,15 +317,35 @@ function compareRequests(left: ChangeRequest, right: ChangeRequest, sort: Reques
   return compareText(left.requestNo, right.requestNo)
 }
 
-function createCatalogBlankRequest(sequence: number) {
+function includeCurrentOption<T extends { code: string }>(activeOptions: T[], allOptions: T[], currentCode?: string) {
+  const current = allOptions.find((option) => option.code === currentCode)
+  return current && !activeOptions.some((option) => option.code === current.code) ? [...activeOptions, current] : activeOptions
+}
+
+function createCatalogBlankRequest(sequence: number, catalogData: CatalogCategory[]) {
   const blank = createBlankRequest(sequence)
-  return { ...blank, manualItemCode: getManualItemOptions(blank.topicCode)[0]?.code ?? '' }
+  const categories = getCategoryOptions(catalogData)
+  const category = categories.find((option) => option.code === blank.categoryCode) ?? categories[0]
+  const topics = getTopicOptions(category?.code, catalogData)
+  const topic = topics.find((option) => option.code === blank.topicCode) ?? topics[0]
+  return {
+    ...blank,
+    categoryCode: category?.code ?? '',
+    topicCode: topic?.code ?? '',
+    manualItemCode: getManualItemOptions(topic?.code, catalogData)[0]?.code ?? '',
+  }
 }
 
 function App() {
   const [tab, setTab] = useState<Tab>('form')
   const [requests, setRequests] = useState<ChangeRequest[]>([])
-  const [form, setForm] = useState<ChangeRequest>(() => createCatalogBlankRequest(1))
+  const [catalogState, setCatalogState] = useState<CatalogLoadResult>(() => ({
+    catalog: createBuiltInCatalog(),
+    source: isCloudConfigured ? 'builtin' : 'local',
+    writable: !isCloudConfigured,
+  }))
+  const catalogData = catalogState.catalog
+  const [form, setForm] = useState<ChangeRequest>(() => createCatalogBlankRequest(1, catalogState.catalog))
   const [missingFields, setMissingFields] = useState<RequiredField[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingBaseRequest, setEditingBaseRequest] = useState<ChangeRequest | null>(null)
@@ -365,6 +388,14 @@ function App() {
       setMessage(`讀取失敗：${error instanceof Error ? error.message : '未知錯誤'}`)
     } finally {
       if (showLoading) setLoading(false)
+    }
+  }
+
+  async function refreshCatalog() {
+    try {
+      setCatalogState(await loadSharedCatalog())
+    } catch (error) {
+      setMessage(`目錄讀取失敗：${error instanceof Error ? error.message : '未知錯誤'}；目前保留畫面上的目錄資料。`)
     }
   }
 
@@ -469,6 +500,7 @@ function App() {
 
   useEffect(() => {
     void refresh()
+    void refreshCatalog()
     void refreshPublicPersonnelUsers()
     void refreshRequestSources()
     getNextRequestNo().then((requestNo) => {
@@ -476,7 +508,7 @@ function App() {
     }).catch(() => undefined)
     let autoSyncTimer: number | undefined
     let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined
-    const revalidate = () => { void refresh(false) }
+    const revalidate = () => { void refresh(false); void refreshCatalog() }
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') revalidate()
     }
@@ -514,6 +546,18 @@ function App() {
       document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [])
+
+  useEffect(() => {
+    const client = supabase
+    if (!client || catalogState.source !== 'cloud') return
+    const channel = client
+      .channel('sqms-catalog-auto-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sqms_catalog_categories' }, () => { void refreshCatalog() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sqms_catalog_topics' }, () => { void refreshCatalog() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sqms_catalog_items' }, () => { void refreshCatalog() })
+      .subscribe()
+    return () => { void client.removeChannel(channel) }
+  }, [catalogState.source])
 
   useEffect(() => {
     if (!currentPerson) return
@@ -568,12 +612,15 @@ function App() {
   const selectedLoginNeedsPassword = Boolean(selectedLoginPerson?.hasPassword || selectedLoginPerson?.password)
 
   const filtered = useMemo(() => filterRequests(requests, filters), [requests, filters])
-  const searched = useMemo(() => filtered.filter((request) => requestMatchesSearch(request, searchQuery)), [filtered, searchQuery])
+  const searched = useMemo(() => filtered.filter((request) => requestMatchesSearch(request, searchQuery, catalogData)), [filtered, searchQuery, catalogData])
   const pending = useMemo(() => searched.filter(isPending), [searched])
   const completed = useMemo(() => searched.filter((request) => request.status === 'completed'), [searched])
   const stats = useMemo(() => buildDashboardStats(requests, filters), [requests, filters])
-  const topicOptions = getTopicOptions(form.categoryCode)
-  const itemOptions = getManualItemOptions(form.topicCode)
+  const categoryOptions = includeCurrentOption(getCategoryOptions(catalogData), getCategoryOptions(catalogData, true), form.categoryCode)
+  const currentTopic = getTopic(form.topicCode, catalogData)
+  const currentItem = getManualItem(form.topicCode, form.manualItemCode, catalogData)
+  const topicOptions = includeCurrentOption(getTopicOptions(form.categoryCode, catalogData), [...getTopicOptions(form.categoryCode, catalogData, true), ...(currentTopic ? [currentTopic] : [])], form.topicCode)
+  const itemOptions = includeCurrentOption(getManualItemOptions(form.topicCode, catalogData), [...getManualItemOptions(form.topicCode, catalogData, true), ...(currentItem ? [currentItem] : [])], form.manualItemCode)
   const nextSequence = requests.length + 1
 
   function fieldError(field: RequiredField) {
@@ -581,7 +628,7 @@ function App() {
   }
 
   async function blankRequestWithCloudNo() {
-    const blank = { ...createCatalogBlankRequest(nextSequence + 1), applicantName: currentPerson?.name ?? '' }
+    const blank = { ...createCatalogBlankRequest(nextSequence + 1, catalogData), applicantName: currentPerson?.name ?? '' }
     try {
       return { ...blank, requestNo: await getNextRequestNo() }
     } catch {
@@ -680,7 +727,7 @@ function App() {
   }
 
   function createBatchRequest() {
-    const blank = createCatalogBlankRequest(nextSequence + 1)
+    const blank = createCatalogBlankRequest(nextSequence + 1, catalogData)
     return {
       ...blank,
       requestNo: isCloudConfigured ? '儲存後自動產生' : blank.requestNo,
@@ -1182,18 +1229,18 @@ function App() {
             <label>申請人 *<input className={fieldError('applicantName')} value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
             <label>大類<select value={form.categoryCode} onChange={(e) => {
               const categoryCode = e.target.value
-              const firstTopic = getTopicOptions(categoryCode)[0]
-              const firstItem = getManualItemOptions(firstTopic?.code)[0]
+              const firstTopic = getTopicOptions(categoryCode, catalogData)[0]
+              const firstItem = getManualItemOptions(firstTopic?.code, catalogData)[0]
               setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: firstItem?.code ?? '' }))
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
-            }}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
+            }}>{categoryOptions.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}{category.active === false ? '（已停用）' : ''}</option>)}</select></label>
             <label>第一層主題<select value={form.topicCode} onChange={(e) => {
               const topicCode = e.target.value
-              const firstItem = getManualItemOptions(topicCode)[0]
+              const firstItem = getManualItemOptions(topicCode, catalogData)[0]
               setForm((current) => ({ ...current, topicCode, manualItemCode: firstItem?.code ?? '' }))
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
-            }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code)}</option>)}</select></label>
-            <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item, index) => <option key={`${form.topicCode}-${item.code}-${index}`} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
+            }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code, catalogData)}{topic.active === false ? '（已停用）' : ''}</option>)}</select></label>
+            <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item, index) => <option key={`${form.topicCode}-${item.id || item.code}-${index}`} value={item.code}>{item.code}｜{item.titleZh}{item.active === false ? '（已停用）' : ''}</option>)}</select></label>
             <label>期望完成日期<input type="date" value={form.targetDueDate} onChange={(e) => updateForm('targetDueDate', e.target.value)} /></label>
             <label>急迫度<select value={form.urgency} onChange={(e) => updateForm('urgency', e.target.value as Urgency)}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="wide">修改內容歸屬補充<input value={form.scopeNote ?? ''} onChange={(e) => updateForm('scopeNote', e.target.value)} placeholder="例如：某段落、某表格、某流程" /></label>
@@ -1214,13 +1261,13 @@ function App() {
         </section>
       )}
 
-      {tab === 'dashboard' && <Dashboard stats={stats} filters={filters} setFilters={setFilters} loading={loading} onRefresh={refresh} requestSourceOptions={requestSourceOptions} />}
+      {tab === 'dashboard' && <Dashboard stats={stats} filters={filters} setFilters={setFilters} loading={loading} onRefresh={refresh} requestSourceOptions={requestSourceOptions} catalogData={catalogData} />}
 
       {(tab === 'all' || tab === 'pending' || tab === 'completed') && (
         <section className="panel">
-          <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} />
-          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} canManageRequests={canManagePage} selectedCount={selectedRequestsForActiveList.length} completableSelectedCount={completableSelectedRequests.length} bulkActionBusy={bulkActionBusy} onBulkComplete={openBulkCompletion} onBulkDelete={deleteSelectedRequests} />
-          <RequestTable requests={listForActiveTab} isAdmin={canManagePage} selectionEnabled={canManagePage} selectedRequestIds={selectedRequestIds} onToggleSelection={toggleRequestSelection} onToggleAll={toggleAllActiveRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
+          <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} catalogData={catalogData} />
+          <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} catalogData={catalogData} canManageRequests={canManagePage} selectedCount={selectedRequestsForActiveList.length} completableSelectedCount={completableSelectedRequests.length} bulkActionBusy={bulkActionBusy} onBulkComplete={openBulkCompletion} onBulkDelete={deleteSelectedRequests} />
+          <RequestTable requests={listForActiveTab} catalogData={catalogData} isAdmin={canManagePage} selectionEnabled={canManagePage} selectedRequestIds={selectedRequestIds} onToggleSelection={toggleRequestSelection} onToggleAll={toggleAllActiveRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
         </section>
       )}
 
@@ -1229,6 +1276,8 @@ function App() {
           adminEmail={adminEmail}
           adminPassword={adminPassword}
           allRequests={requests}
+          catalogState={catalogState}
+          canManageCatalog={isAdmin}
           canAccessAdminPage={canManagePage}
           isOwner={isOwner}
           requestSourceOptions={requestSourceOptions}
@@ -1242,6 +1291,8 @@ function App() {
           setNewPerson={setNewPerson}
           onAdminLogin={adminLogin}
           onDataPurged={() => refresh(false)}
+          onCatalogUpdated={setCatalogState}
+          onRefreshCatalog={refreshCatalog}
           onAddRequestSource={addRequestSourceOption}
           onRemoveRequestSource={removeRequestSourceOption}
           onAddPersonnel={addPersonnel}
@@ -1261,6 +1312,7 @@ function App() {
         onConfirm={handlePersonnelLogin}
       />}
       {batchRequestOpen && <BatchRequestModal
+        catalogData={catalogData}
         requestSourceOptions={requestSourceOptions}
         createRequest={createBatchRequest}
         onSave={saveBatchRequest}
@@ -1273,12 +1325,12 @@ function App() {
   )
 }
 
-function Dashboard({ stats, filters, setFilters, loading, onRefresh, requestSourceOptions }: { stats: ReturnType<typeof buildDashboardStats>, filters: Filters, setFilters: (f: Filters) => void, loading: boolean, onRefresh: () => void, requestSourceOptions: string[] }) {
-  const categoryData = Object.entries(stats.byCategory).map(([name, value]) => ({ name, value }))
-  const topicData = buildTopicChartData(stats.byTopic)
+function Dashboard({ stats, filters, setFilters, loading, onRefresh, requestSourceOptions, catalogData }: { stats: ReturnType<typeof buildDashboardStats>, filters: Filters, setFilters: (f: Filters) => void, loading: boolean, onRefresh: () => void, requestSourceOptions: string[], catalogData: CatalogCategory[] }) {
+  const categoryData = Object.entries(stats.byCategory).map(([code, value]) => ({ name: getCategoryName(code, catalogData), value }))
+  const topicData = buildTopicChartData(stats.byTopic, catalogData)
   const sourceData = Object.entries(stats.byRequestSource).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }))
   return <section className="panel dashboard-panel">
-    <ListHeader title="狀態 Dashboard" filters={filters} setFilters={setFilters} requests={[]} onRefresh={onRefresh} hideExports requestSourceOptions={requestSourceOptions} />
+    <ListHeader title="狀態 Dashboard" filters={filters} setFilters={setFilters} requests={[]} onRefresh={onRefresh} hideExports requestSourceOptions={requestSourceOptions} catalogData={catalogData} />
     <div className="kpi-grid">
       <Kpi label="提出件數" value={stats.total} tone="mint" />
       <Kpi label="完成件數" value={stats.completed} tone="blue" />
@@ -1303,6 +1355,8 @@ type AdminPanelProps = {
   adminEmail: string
   adminPassword: string
   allRequests: ChangeRequest[]
+  catalogState: CatalogLoadResult
+  canManageCatalog: boolean
   canAccessAdminPage: boolean
   isOwner: boolean
   requestSourceOptions: string[]
@@ -1316,6 +1370,8 @@ type AdminPanelProps = {
   setNewPerson: (value: { department: string, name: string, username: string, password: string, role: PersonnelRole }) => void
   onAdminLogin: (event: React.FormEvent) => void
   onDataPurged: () => Promise<void> | void
+  onCatalogUpdated: (result: CatalogLoadResult) => void
+  onRefreshCatalog: () => Promise<void> | void
   onAddRequestSource: () => void
   onRemoveRequestSource: (value: string) => void
   onAddPersonnel: () => void
@@ -1325,7 +1381,8 @@ type AdminPanelProps = {
   onRemovePersonnel: (person: PersonnelUser) => void
 }
 
-function AdminPanel({ adminEmail, adminPassword, allRequests, canAccessAdminPage, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onDataPurged, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+function AdminPanel({ adminEmail, adminPassword, allRequests, catalogState, canManageCatalog, canAccessAdminPage, isOwner, requestSourceOptions, newRequestSource, personnelRoster, personnelDirty, newPerson, setAdminEmail, setAdminPassword, setNewRequestSource, setNewPerson, onAdminLogin, onDataPurged, onCatalogUpdated, onRefreshCatalog, onAddRequestSource, onRemoveRequestSource, onAddPersonnel, onUpdatePersonnelDraft, onSaveAllPersonnel, onSavePersonnel, onRemovePersonnel }: AdminPanelProps) {
+  const [section, setSection] = useState<'catalog' | 'sources' | 'personnel' | 'data'>('catalog')
   return <section className="panel admin-panel">
     <div className="section-title"><div><p className="eyebrow">Admin</p><h2>管理員後台</h2></div></div>
     {!canAccessAdminPage ? (
@@ -1338,17 +1395,25 @@ function AdminPanel({ adminEmail, adminPassword, allRequests, canAccessAdminPage
         </form>
       </div>
     ) : (
-      <div className="admin-stack">
-        <section className="admin-card">
+      <div className="admin-workspace">
+        <nav className="admin-side-nav" aria-label="管理頁分區">
+          <button type="button" className={section === 'catalog' ? 'active' : ''} aria-current={section === 'catalog' ? 'page' : undefined} onClick={() => setSection('catalog')}><b>目錄與分類</b><span>大類、第一層、第二層</span></button>
+          <button type="button" className={section === 'sources' ? 'active' : ''} aria-current={section === 'sources' ? 'page' : undefined} onClick={() => setSection('sources')}><b>需求來源</b><span>來源選項</span></button>
+          <button type="button" className={section === 'personnel' ? 'active' : ''} aria-current={section === 'personnel' ? 'page' : undefined} onClick={() => setSection('personnel')}><b>人員與權限</b><span>身份、角色與密碼</span></button>
+          <button type="button" className={section === 'data' ? 'active' : ''} aria-current={section === 'data' ? 'page' : undefined} onClick={() => setSection('data')}><b>資料與空間</b><span>用量及永久清理</span></button>
+        </nav>
+        <div className="admin-section-content">
+          {section === 'catalog' && <CatalogManagementPanel catalogData={catalogState.catalog} requests={allRequests} canManage={canManageCatalog} writable={catalogState.writable} source={catalogState.source} warning={catalogState.warning} onCatalogUpdated={onCatalogUpdated} onRefresh={onRefreshCatalog} />}
+          {section === 'sources' && <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Request Sources</p><h3>需求來源項目管理</h3></div></div>
           <div className="source-option-form">
             <input value={newRequestSource} onChange={(e) => setNewRequestSource(e.target.value)} placeholder="新增來源項目，例如：船隊要求" />
             <button className="primary" type="button" onClick={onAddRequestSource}>新增來源</button>
           </div>
           <div className="source-option-list">{requestSourceOptions.map((source) => <span key={source} className="source-option-chip">{source}<button type="button" onClick={() => onRemoveRequestSource(source)}>×</button></span>)}</div>
-        </section>
+        </section>}
 
-        <section className="admin-card">
+        {section === 'personnel' && <section className="admin-card">
           <div className="section-title compact-title"><div><p className="eyebrow">Personnel</p><h3>人員與權限管控</h3></div></div>
           <p className="subtle">已按你上傳的人員清單替換預設名單。Owner 資訊不在此處變更；只有 Owner 可以修改人員用戶名、密碼、角色或停用人員。修改後請點「保存全部人員修改到雲端」。</p>
           {isOwner && <div className="personnel-save-bar"><button className="primary" type="button" onClick={onSaveAllPersonnel}>{personnelDirty ? '保存全部人員修改到雲端（有未保存變更）' : '保存全部人員修改到雲端'}</button><span className={personnelDirty ? 'save-warning' : 'subtle'}>{personnelDirty ? '有未保存修改，刷新前請先保存。' : '目前沒有未保存的人員修改。'}</span></div>}
@@ -1361,9 +1426,10 @@ function AdminPanel({ adminEmail, adminPassword, allRequests, canAccessAdminPage
             <button className="primary" type="button" onClick={onAddPersonnel}><UserPlus size={14} />新增人員</button>
           </div> : <p className="subtle">你是 Admin，可查看人員名單；用戶名與密碼僅 Owner 可修改。</p>}
           <div className="personnel-roster-grid">{personnelDepartments.map((dept) => <div key={dept} className="personnel-dept-row"><div className="dept-name"><b>{dept}</b><span>{personnelRoster[dept]?.length ?? 0} 人</span></div><div className="personnel-row-wrap">{(personnelRoster[dept] ?? []).map((person) => <div key={person.id || `${dept}-${person.name}`} className="personnel-user-row"><input value={person.name} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { name: e.target.value })} aria-label={`${person.name} 姓名`} /><input value={person.username} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { username: e.target.value })} aria-label={`${person.name} 用戶名`} />{isOwner ? <input type="password" value={person.password || ''} onChange={(e) => onUpdatePersonnelDraft(person, { password: e.target.value })} placeholder="密碼" aria-label={`${person.name} 密碼`} /> : <span className="password-hidden">密碼僅 Owner 可見</span>}<select value={person.role} disabled={!isOwner} onChange={(e) => onUpdatePersonnelDraft(person, { role: e.target.value as PersonnelRole })}><option value="operator">操作員</option><option value="admin">管理員</option></select>{isOwner && <><button className="ghost" type="button" onClick={() => onSavePersonnel(person)}>保存</button><button className="danger" type="button" onClick={() => onRemovePersonnel(person)}>停用</button></>}</div>)}</div></div>)}</div>
-        </section>
+        </section>}
 
-        <DataManagementPanel requests={allRequests} onPurged={onDataPurged} />
+        {section === 'data' && <DataManagementPanel requests={allRequests} onPurged={onDataPurged} />}
+        </div>
       </div>
     )}
   </section>
@@ -1415,12 +1481,12 @@ function BulkCompletionDateModal({ count, busy, onCancel, onConfirm }: { count: 
   </div>
 }
 
-function PrintHeader({ title, filters, count, searchQuery = '' }: { title: string, filters: Filters, count: number, searchQuery?: string }) {
+function PrintHeader({ title, filters, count, searchQuery = '', catalogData }: { title: string, filters: Filters, count: number, searchQuery?: string, catalogData: CatalogCategory[] }) {
   const printDate = new Date().toLocaleString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   const filterSummary = [
     filters.from || filters.to ? `日期：${filters.from || '不限'} 至 ${filters.to || '不限'}` : '日期：全部',
-    filters.categoryCode ? `大類：${filters.categoryCode}` : '大類：全部',
-    filters.topicCode ? `第一層主題：${filters.topicCode}` : '第一層主題：全部',
+    filters.categoryCode ? `大類：${filters.categoryCode}｜${getCategoryName(filters.categoryCode, catalogData)}` : '大類：全部',
+    filters.topicCode ? `第一層主題：${getTopicLabel(filters.topicCode, catalogData)}` : '第一層主題：全部',
     filters.requestSource !== 'all' ? `來源：${filters.requestSource}` : '來源：全部',
     filters.status !== 'all' ? `狀態：${statusLabels[filters.status]}` : '狀態：全部',
     filters.urgency !== 'all' ? `急迫度：${urgencyLabels[filters.urgency]}` : '急迫度：全部',
@@ -1439,8 +1505,8 @@ function PrintHeader({ title, filters, count, searchQuery = '' }: { title: strin
   </div>
 }
 
-function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery, requestSourceOptions = DEFAULT_REQUEST_SOURCES as unknown as string[], canManageRequests = false, selectedCount = 0, completableSelectedCount = 0, bulkActionBusy = false, onBulkComplete, onBulkDelete }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void, requestSourceOptions?: string[], canManageRequests?: boolean, selectedCount?: number, completableSelectedCount?: number, bulkActionBusy?: boolean, onBulkComplete?: () => void, onBulkDelete?: () => void }) {
-  const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode) : []
+function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExports = false, searchQuery, setSearchQuery, requestSourceOptions = DEFAULT_REQUEST_SOURCES as unknown as string[], catalogData, canManageRequests = false, selectedCount = 0, completableSelectedCount = 0, bulkActionBusy = false, onBulkComplete, onBulkDelete }: { title: string, filters: Filters, setFilters: (f: Filters) => void, requests: ChangeRequest[], onRefresh: () => void, hideExports?: boolean, searchQuery?: string, setSearchQuery?: (value: string) => void, requestSourceOptions?: string[], catalogData: CatalogCategory[], canManageRequests?: boolean, selectedCount?: number, completableSelectedCount?: number, bulkActionBusy?: boolean, onBulkComplete?: () => void, onBulkDelete?: () => void }) {
+  const topics = filters.categoryCode ? getTopicOptions(filters.categoryCode, catalogData, true) : []
   const [rangePreset, setRangePreset] = useState('')
   const applyRecentDays = (days: number) => {
     const today = new Date()
@@ -1463,7 +1529,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       <div><p className="eyebrow">List</p><h2>{title}</h2></div>
       <div className="header-actions">
         <button className="ghost" onClick={onRefresh} title="資料平時會自動更新；此按鈕只在需要時重新讀取"><RefreshCw size={14} />重新整理</button>
-        {!hideExports && <><button className="ghost" onClick={() => window.print()}><Printer size={14} />列印/PDF</button><button className="ghost" onClick={() => exportCsv(requests, 'sqms修訂需求.csv')}><Download size={14} />CSV</button><button className="ghost" onClick={() => exportExcel(requests, 'sqms修訂需求.xlsx')}><FileSpreadsheet size={14} />Excel</button></>}
+        {!hideExports && <><button className="ghost" onClick={() => window.print()}><Printer size={14} />列印/PDF</button><button className="ghost" onClick={() => exportCsv(requests, 'sqms修訂需求.csv', catalogData)}><Download size={14} />CSV</button><button className="ghost" onClick={() => exportExcel(requests, 'sqms修訂需求.xlsx', catalogData)}><FileSpreadsheet size={14} />Excel</button></>}
       </div>
     </div>
     {setSearchQuery && <p className="duplicate-search-hint">{duplicateSearchHint}</p>}
@@ -1478,8 +1544,8 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
       <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
       <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
       <select value={filters.requestSource} onChange={(e) => setFilters({ ...filters, requestSource: e.target.value })}><option value="all">全部來源</option>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select>
-      <select value={filters.categoryCode} onChange={(e) => setFilters({ ...filters, categoryCode: e.target.value, topicCode: '' })}><option value="">全部大類</option>{catalog.map((c) => <option key={c.code} value={c.code}>{c.code}｜{c.nameZh}</option>)}</select>
-      <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{getTopicDisplayLabel(t.code)}</option>)}</select>
+      <select value={filters.categoryCode} onChange={(e) => setFilters({ ...filters, categoryCode: e.target.value, topicCode: '' })}><option value="">全部大類</option>{getCategoryOptions(catalogData, true).map((c) => <option key={c.code} value={c.code}>{c.code}｜{c.nameZh}{c.active === false ? '（已停用）' : ''}</option>)}</select>
+      <select value={filters.topicCode} onChange={(e) => setFilters({ ...filters, topicCode: e.target.value })}><option value="">全部第一層主題</option>{topics.map((t) => <option key={t.code} value={t.code}>{getTopicDisplayLabel(t.code, catalogData)}{t.active === false ? '（已停用）' : ''}</option>)}</select>
       <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value as RequestStatus | 'all' })}><option value="all">全部狀態</option>{Object.entries(statusLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <select value={filters.urgency} onChange={(e) => setFilters({ ...filters, urgency: e.target.value as Urgency | 'all' })}><option value="all">全部急迫度</option>{Object.entries(urgencyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
       <button className="ghost" type="button" onClick={clearFilters}>清除</button>
@@ -1491,7 +1557,7 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
   </div>
 }
 
-function RequestTable({ requests, isAdmin, selectionEnabled = false, selectedRequestIds = [], onToggleSelection, onToggleAll, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], isAdmin: boolean, selectionEnabled?: boolean, selectedRequestIds?: string[], onToggleSelection?: (requestId: string) => void, onToggleAll?: () => void, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
+function RequestTable({ requests, catalogData, isAdmin, selectionEnabled = false, selectedRequestIds = [], onToggleSelection, onToggleAll, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], catalogData: CatalogCategory[], isAdmin: boolean, selectionEnabled?: boolean, selectedRequestIds?: string[], onToggleSelection?: (requestId: string) => void, onToggleAll?: () => void, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
   const [sort, setSort] = useState<RequestSort>({ key: 'requestNo', direction: 'desc' })
   const sorted = [...requests].sort((a, b) => compareRequests(a, b, sort))
   const allSelected = requests.length > 0 && requests.every((request) => selectedRequestIds.includes(request.id))
@@ -1510,7 +1576,7 @@ function RequestTable({ requests, isAdmin, selectionEnabled = false, selectedReq
   return <div className="table-wrap"><table className={`request-table ${selectionEnabled ? 'with-selection' : ''}`}><colgroup>{selectionEnabled && <col className="col-select no-print" />}<col className="col-status" /><col className="col-urgency" /><col className="col-no" /><col className="col-source" /><col className="col-scope" /><col className="col-content" /><col className="col-due" /><col className="col-applicant" /><col className="col-actions" /></colgroup><thead><tr>{selectionEnabled && <th className="select-cell no-print"><input className="table-select" type="checkbox" aria-label="全選目前清單" checked={allSelected} ref={(node) => { if (node) node.indeterminate = someSelected && !allSelected }} onChange={onToggleAll} /></th>}{sortHeader('status', '狀態')}{sortHeader('urgency', '急迫度')}{sortHeader('requestNo', '編號')}{sortHeader('requestSource', '來源')}{sortHeader('scope', '歸屬')}<th>建議內容</th>{sortHeader('targetDueDate', '期望日')}{sortHeader('applicantName', '申請人')}<th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={selectionEnabled ? 10 : 9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
     const completed = request.status === 'completed'
     const selected = selectedRequestIds.includes(request.id)
-    return <tr key={request.id} className={`${isOverdue(request) ? 'overdue' : ''}${selected ? ' selected' : ''}`}>{selectionEnabled && <td className="select-cell no-print"><input className="table-select" type="checkbox" aria-label={`選取 ${request.requestNo}`} checked={selected} onChange={() => onToggleSelection?.(request.id)} /></td>}<td>{isAdmin ? <select className={`status-select ${request.status}`} aria-label={`${request.requestNo} 狀態`} value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td><span className={`urgency ${request.urgency}`}>{urgencyLabels[request.urgency]}</span></td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode)}</span><b>{getTopicLabel(request.topicCode)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td>{request.targetDueDate || '—'}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}<button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button></>}</td></tr>
+    return <tr key={request.id} className={`${isOverdue(request) ? 'overdue' : ''}${selected ? ' selected' : ''}`}>{selectionEnabled && <td className="select-cell no-print"><input className="table-select" type="checkbox" aria-label={`選取 ${request.requestNo}`} checked={selected} onChange={() => onToggleSelection?.(request.id)} /></td>}<td>{isAdmin ? <select className={`status-select ${request.status}`} aria-label={`${request.requestNo} 狀態`} value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td><span className={`urgency ${request.urgency}`}>{urgencyLabels[request.urgency]}</span></td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className="tag">{getCategoryName(request.categoryCode, catalogData)}</span><b>{getTopicLabel(request.topicCode, catalogData)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode, catalogData) || '未選第二層'}</small></td><td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td>{request.targetDueDate || '—'}</td><td>{request.applicantName}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}<button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button></>}</td></tr>
   })}</tbody></table></div>
 }
 export default App

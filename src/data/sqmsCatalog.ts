@@ -3757,20 +3757,34 @@ export const catalog: CatalogCategory[] = [
   }
 ]
 
-export function getCategory(code?: string): CatalogCategory | undefined {
-  return catalog.find((category) => category.code === code)
+function bySortOrder<T extends { sortOrder: number, code: string }>(left: T, right: T) {
+  return left.sortOrder - right.sortOrder || left.code.localeCompare(right.code, 'zh-Hant', { numeric: true })
 }
 
-export function getTopicOptions(categoryCode?: string): Topic[] {
-  return getCategory(categoryCode)?.topics ?? []
+export function isCatalogEntryActive(entry: { active?: boolean }) {
+  return entry.active !== false
 }
 
-export function getTopic(topicCode?: string): Topic | undefined {
-  return catalog.flatMap((category) => category.topics).find((topic) => topic.code === topicCode)
+export function getCategory(code?: string, source: CatalogCategory[] = catalog): CatalogCategory | undefined {
+  return source.find((category) => category.code === code)
 }
 
-export function getTopicAbbreviation(topicCode?: string): string {
-  const topic = getTopic(topicCode)
+export function getCategoryOptions(source: CatalogCategory[] = catalog, includeInactive = false): CatalogCategory[] {
+  return source.filter((category) => includeInactive || isCatalogEntryActive(category)).toSorted(bySortOrder)
+}
+
+export function getTopicOptions(categoryCode?: string, source: CatalogCategory[] = catalog, includeInactive = false): Topic[] {
+  return (getCategory(categoryCode, source)?.topics ?? [])
+    .filter((topic) => includeInactive || isCatalogEntryActive(topic))
+    .toSorted(bySortOrder)
+}
+
+export function getTopic(topicCode?: string, source: CatalogCategory[] = catalog): Topic | undefined {
+  return source.flatMap((category) => category.topics).find((topic) => topic.code === topicCode)
+}
+
+export function getTopicAbbreviation(topicCode?: string, source: CatalogCategory[] = catalog): string {
+  const topic = getTopic(topicCode, source)
   if (!topic) return topicCode?.match(/^[A-Za-z]+/)?.[0]?.toUpperCase() ?? ''
   const itemPrefix = topic.items
     .map((item) => item.code.match(/^[A-Za-z]+/)?.[0]?.toUpperCase())
@@ -3778,17 +3792,25 @@ export function getTopicAbbreviation(topicCode?: string): string {
   return itemPrefix || topic.code.match(/^[A-Za-z]+/)?.[0]?.toUpperCase() || ''
 }
 
-export function getTopicDisplayLabel(topicCode?: string): string {
-  const topic = getTopic(topicCode)
+export function getTopicDisplayLabel(topicCode?: string, source: CatalogCategory[] = catalog): string {
+  const topic = getTopic(topicCode, source)
   if (!topic) return topicCode || ''
-  const abbreviation = getTopicAbbreviation(topic.code)
+  const abbreviation = getTopicAbbreviation(topic.code, source)
   return abbreviation ? `${topic.code}｜${abbreviation}｜${topic.titleZh}` : `${topic.code}｜${topic.titleZh}`
 }
 
-export function getManualItemOptions(topicCode?: string): ManualItem[] {
-  return getTopic(topicCode)?.items ?? []
+export function getManualItemOptions(topicCode?: string, source: CatalogCategory[] = catalog, includeInactive = false): ManualItem[] {
+  const items = getTopic(topicCode, source)?.items ?? []
+  const codeCounts = new Map<string, number>()
+  items.forEach((item) => codeCounts.set(item.code, (codeCounts.get(item.code) ?? 0) + 1))
+  return items
+    .filter((item) => includeInactive || (isCatalogEntryActive(item) && codeCounts.get(item.code) === 1))
+    .toSorted(bySortOrder)
 }
 
-export function getManualItem(topicCode?: string, itemCode?: string): ManualItem | undefined {
-  return getManualItemOptions(topicCode).find((item) => item.code === itemCode)
+export function getManualItem(topicCode?: string, itemCode?: string, source: CatalogCategory[] = catalog): ManualItem | undefined {
+  const exactMatch = (getTopic(topicCode, source)?.items ?? []).find((item) => item.code === itemCode)
+  if (exactMatch) return exactMatch
+  const globalMatches = source.flatMap((category) => category.topics).flatMap((topic) => topic.items).filter((item) => item.code === itemCode)
+  return globalMatches.length === 1 ? globalMatches[0] : undefined
 }

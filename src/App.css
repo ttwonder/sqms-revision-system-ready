@@ -128,6 +128,49 @@ tr.selected td { box-shadow: inset 0 0 0 1px rgba(139, 95, 163, .22); }
 .admin-login { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
 .permission-card, .admin-card { border: 1px solid var(--line); border-radius: 18px; background: #fff; padding: 14px; }
 .admin-stack { display: grid; gap: 14px; }
+.admin-workspace { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 14px; align-items: start; }
+.admin-side-nav { position: sticky; top: 76px; display: grid; gap: 7px; padding: 8px; border: 1px solid var(--line); border-radius: 18px; background: #fffafd; }
+.admin-side-nav button { width: 100%; display: grid; gap: 3px; padding: 11px 12px; border: 0; border-radius: 13px; background: transparent; color: #675070; text-align: left; }
+.admin-side-nav button b { font-size: .9rem; }
+.admin-side-nav button span { color: var(--muted); font-size: .72rem; }
+.admin-side-nav button.active { background: linear-gradient(135deg, #f7e9f4, #edf7ff); color: #493552; box-shadow: inset 0 0 0 1px #e5d5e7; }
+.admin-side-nav button.active span { color: #725d7a; }
+.admin-section-content { min-width: 0; }
+.admin-section-content > .admin-card, .admin-section-content > .data-management-panel { min-height: 180px; }
+.catalog-management-panel { display: grid; gap: 11px; }
+.catalog-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: .8rem; font-weight: 800; }
+.catalog-source { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; }
+.catalog-source.cloud { background: #ecfdf5; color: #166534; }
+.catalog-source.local { background: #eff6ff; color: #1d4ed8; }
+.catalog-safety-note, .catalog-warning, .catalog-duplicate-warning, .catalog-notice { margin: 0; padding: 9px 11px; border-radius: 12px; font-size: .82rem; line-height: 1.5; font-weight: 800; }
+.catalog-safety-note { color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; }
+.catalog-warning, .catalog-duplicate-warning { color: #854d0e; background: #fffbeb; border: 1px solid #fde68a; }
+.catalog-notice { color: #166534; background: #ecfdf5; border: 1px solid #86efac; }
+.catalog-notice.error { color: #9f1239; background: #fff1f2; border-color: #fecdd3; }
+.catalog-level-grid { display: grid; grid-template-columns: .78fr 1fr 1.35fr; gap: 10px; min-width: 0; }
+.catalog-level-column { min-width: 0; display: grid; grid-template-rows: auto auto minmax(260px, 58vh); gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 16px; background: #fffdfd; }
+.catalog-level-column > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; }
+.catalog-level-column > header > div { display: flex; align-items: center; gap: 7px; }
+.catalog-level-column > header span { min-width: 22px; padding: 2px 6px; border-radius: 999px; background: #f4eeff; color: #70558a; font-size: .72rem; font-weight: 900; text-align: center; }
+.catalog-level-column > input { padding: 8px 9px; }
+.catalog-entry-list { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 6px; padding-right: 2px; }
+.catalog-entry { min-width: 0; display: grid; gap: 6px; padding: 8px; border: 1px solid #eaddeb; border-radius: 12px; background: #fff; }
+.catalog-entry.selected { border-color: #b99cca; background: #fbf7ff; box-shadow: 0 0 0 2px rgba(205, 180, 219, .22); }
+.catalog-entry.inactive { background: #f8fafc; border-style: dashed; opacity: .72; }
+.catalog-entry.duplicate { border-color: #f6c453; background: #fffdf5; }
+.catalog-entry-main { min-width: 0; display: grid; gap: 2px; padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; }
+button.catalog-entry-main { width: 100%; }
+.catalog-entry-main b, .catalog-entry-main span, .catalog-entry-main small { min-width: 0; overflow-wrap: anywhere; }
+.catalog-entry-main b { color: #574061; font-size: .8rem; }
+.catalog-entry-main span { font-size: .8rem; line-height: 1.35; }
+.catalog-entry-main small { color: var(--muted); font-size: .69rem; font-weight: 800; }
+.catalog-entry > div:last-child { display: flex; flex-wrap: wrap; gap: 5px; }
+.catalog-mini-action { padding: 5px 7px !important; border-radius: 8px !important; font-size: .7rem; }
+.catalog-empty { margin: 0; padding: 18px 8px; color: var(--muted); text-align: center; font-size: .8rem; }
+.catalog-editor-modal { width: min(560px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; display: grid; gap: 11px; padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: var(--shadow); }
+.catalog-editor-modal h3 { margin: 3px 0 0; }
+.catalog-editor-modal input:disabled { background: #f1f5f9; color: #64748b; opacity: 1; cursor: not-allowed; }
+.catalog-editor-help { margin: 0; padding: 9px 10px; border-radius: 11px; background: #f8fafc; color: #64748b; font-size: .79rem; line-height: 1.5; font-weight: 800; }
 .role-pill { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 4px 9px; font-weight: 900; font-size: .76rem; white-space: nowrap; }
 .role-pill.owner { background: #f4eeff; color: #7d5aa0; }
 .role-pill.admin { background: #e8f7f1; color: #277056; }
@@ -182,7 +225,10 @@ tr.selected td { box-shadow: inset 0 0 0 1px rgba(139, 95, 163, .22); }
   .list-title-row { align-items: stretch; }
   .header-actions { justify-content: flex-start; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-  .chart-grid, .admin-login, .admin-user-form, .admin-user-row { grid-template-columns: 1fr; }
+  .chart-grid, .admin-login, .admin-user-form, .admin-user-row, .admin-workspace, .catalog-level-grid { grid-template-columns: 1fr; }
+  .admin-side-nav { position: static; grid-template-columns: 1fr 1fr; }
+  .admin-side-nav button { min-width: 0; }
+  .catalog-level-column { grid-template-rows: auto auto minmax(180px, 46vh); }
   .filters { display: grid; grid-template-columns: 1fr 1fr; }
   .filters input, .filters select, .filters button { width: 100%; min-width: 0; }
   .bulk-action-group { grid-column: span 2; display: grid; grid-template-columns: 1fr 1fr; }

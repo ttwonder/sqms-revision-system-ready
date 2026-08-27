@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { CheckCircle2, PlusCircle, Save, Trash2 } from 'lucide-react'
-import { catalog, getManualItemOptions, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
+import { getCategoryOptions, getManualItemOptions, getTopicDisplayLabel, getTopicOptions } from './data/sqmsCatalog'
 import { urgencyLabels } from './lib/exporters'
-import type { ChangeRequest, Urgency } from './types'
+import type { CatalogCategory, ChangeRequest, Urgency } from './types'
 
 type RequiredField = 'requestSource' | 'applicantName' | 'suggestedChange' | 'changeReason'
 type EntryState = 'pending' | 'saving' | 'saved' | 'error'
@@ -17,6 +17,7 @@ type BatchEntry = {
 }
 
 type BatchRequestModalProps = {
+  catalogData: CatalogCategory[]
   requestSourceOptions: string[]
   createRequest: () => ChangeRequest
   onSave: (request: ChangeRequest) => Promise<ChangeRequest>
@@ -37,7 +38,7 @@ function missingRequiredFields(request: ChangeRequest): RequiredField[] {
   return missing
 }
 
-export default function BatchRequestModal({ requestSourceOptions, createRequest, onSave, onCancel, onComplete }: BatchRequestModalProps) {
+export default function BatchRequestModal({ catalogData, requestSourceOptions, createRequest, onSave, onCancel, onComplete }: BatchRequestModalProps) {
   const [entries, setEntries] = useState<BatchEntry[]>(() => [createEntry(createRequest())])
   const [saving, setSaving] = useState(false)
   const [summary, setSummary] = useState('每一筆都會獨立送至伺服器並取得正式需求編號。')
@@ -57,8 +58,8 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
   }
 
   function changeCategory(key: string, categoryCode: string) {
-    const firstTopic = getTopicOptions(categoryCode)[0]
-    const firstItem = getManualItemOptions(firstTopic?.code)[0]
+    const firstTopic = getTopicOptions(categoryCode, catalogData)[0]
+    const firstItem = getManualItemOptions(firstTopic?.code, catalogData)[0]
     setEntries((current) => current.map((entry) => entry.key === key && entry.state !== 'saved' ? {
       ...entry,
       request: { ...entry.request, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: firstItem?.code ?? '' },
@@ -68,7 +69,7 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
   }
 
   function changeTopic(key: string, topicCode: string) {
-    const firstItem = getManualItemOptions(topicCode)[0]
+    const firstItem = getManualItemOptions(topicCode, catalogData)[0]
     setEntries((current) => current.map((entry) => entry.key === key && entry.state !== 'saved' ? {
       ...entry,
       request: { ...entry.request, topicCode, manualItemCode: firstItem?.code ?? '' },
@@ -150,8 +151,8 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
       <form onSubmit={submitBatch} className="batch-form">
         <div className="batch-entry-list">
           {entries.map((entry, index) => {
-            const topicOptions = getTopicOptions(entry.request.categoryCode)
-            const itemOptions = getManualItemOptions(entry.request.topicCode)
+            const topicOptions = getTopicOptions(entry.request.categoryCode, catalogData)
+            const itemOptions = getManualItemOptions(entry.request.topicCode, catalogData)
             const disabled = saving || entry.state === 'saved'
             const fieldError = (field: RequiredField) => entry.missing.includes(field) ? 'field-error' : undefined
             return <section className={`batch-entry ${entry.state}`} key={entry.key} aria-label={`需求 ${index + 1}`}>
@@ -169,8 +170,8 @@ export default function BatchRequestModal({ requestSourceOptions, createRequest,
                 <label>需求編號<input value={entry.state === 'saved' ? entry.request.requestNo : '儲存後自動產生'} readOnly /></label>
                 <label>需求來源 *<select className={fieldError('requestSource')} value={entry.request.requestSource} onChange={(event) => updateEntry(entry.key, 'requestSource', event.target.value)} disabled={disabled}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
                 <label>申請人 *<input className={fieldError('applicantName')} value={entry.request.applicantName} onChange={(event) => updateEntry(entry.key, 'applicantName', event.target.value)} placeholder="輸入姓名" disabled={disabled} /></label>
-                <label>大類<select value={entry.request.categoryCode} onChange={(event) => changeCategory(entry.key, event.target.value)} disabled={disabled}>{catalog.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
-                <label>第一層主題<select value={entry.request.topicCode} onChange={(event) => changeTopic(entry.key, event.target.value)} disabled={disabled}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code)}</option>)}</select></label>
+                <label>大類<select value={entry.request.categoryCode} onChange={(event) => changeCategory(entry.key, event.target.value)} disabled={disabled}>{getCategoryOptions(catalogData).map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}</option>)}</select></label>
+                <label>第一層主題<select value={entry.request.topicCode} onChange={(event) => changeTopic(entry.key, event.target.value)} disabled={disabled}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code, catalogData)}</option>)}</select></label>
                 <label>第二層手冊 / 文件項<select value={entry.request.manualItemCode ?? ''} onChange={(event) => updateEntry(entry.key, 'manualItemCode', event.target.value)} disabled={disabled}><option value="">只具體到第一層主題</option>{itemOptions.map((item, itemIndex) => <option key={`${entry.request.topicCode}-${item.code}-${itemIndex}`} value={item.code}>{item.code}｜{item.titleZh}</option>)}</select></label>
                 <label>期望完成日期<input type="date" value={entry.request.targetDueDate} onChange={(event) => updateEntry(entry.key, 'targetDueDate', event.target.value)} disabled={disabled} /></label>
                 <label>急迫度<select value={entry.request.urgency} onChange={(event) => updateEntry(entry.key, 'urgency', event.target.value as Urgency)} disabled={disabled}>{Object.entries(urgencyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

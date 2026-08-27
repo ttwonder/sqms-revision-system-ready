@@ -4,6 +4,7 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import BatchRequestModal from './BatchRequestModal'
+import { catalog } from './data/sqmsCatalog'
 import { createBlankRequest } from './lib/storage'
 
 afterEach(cleanup)
@@ -25,6 +26,7 @@ describe('BatchRequestModal', () => {
     const onComplete = vi.fn()
 
     render(<BatchRequestModal
+      catalogData={catalog}
       requestSourceOptions={['外部檢查']}
       createRequest={createRequest}
       onSave={onSave}

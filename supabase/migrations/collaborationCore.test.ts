@@ -10,6 +10,7 @@ const businessDateHotfixUrl = new URL('./202608110001_fix_create_request_busines
 const permissionsMigrationUrl = new URL('./202608210001_guest_edit_admin_lifecycle.sql', import.meta.url)
 const dataManagementMigrationUrl = new URL('./202608210002_data_management_storage.sql', import.meta.url)
 const patchFieldsHotfixUrl = new URL('./202608250001_fix_patch_changed_fields_ambiguity.sql', import.meta.url)
+const catalogManagementMigrationUrl = new URL('./202608270001_catalog_management.sql', import.meta.url)
 
 describe('collaboration core migration contract', () => {
   it('routes every request mutation through idempotent server commands', () => {
@@ -96,6 +97,29 @@ describe('collaboration core migration contract', () => {
     expect(migrationSql).toContain('delete from request_events')
     expect(migrationSql).toContain('and request.is_deleted = true')
     expect(migrationSql).toContain('BATCH_LIMIT_EXCEEDED')
+  })
+
+  it('ships an additive cloud catalog with immutable codes and manager-only writes', () => {
+    const migrationPath = fileURLToPath(catalogManagementMigrationUrl)
+    expect(existsSync(migrationPath)).toBe(true)
+    if (!existsSync(migrationPath)) return
+
+    const migrationSql = readFileSync(migrationPath, 'utf8')
+    expect(migrationSql).toContain('create table if not exists sqms_catalog_categories')
+    expect(migrationSql).toContain('create table if not exists sqms_catalog_topics')
+    expect(migrationSql).toContain('create table if not exists sqms_catalog_items')
+    expect(migrationSql).toContain('create or replace function can_manage_sqms_catalog()')
+    expect(migrationSql).toContain('select is_sqms_admin();')
+    expect(migrationSql).toContain('create or replace function save_sqms_catalog_entry')
+    expect(migrationSql).toContain('已建立的大類代碼不可修改')
+    expect(migrationSql).toContain('已建立的第一層主題代碼不可修改')
+    expect(migrationSql).toContain('已建立的第二層項目代碼不可修改')
+    expect(migrationSql).toContain('新建代碼必須在全目錄唯一')
+    expect(migrationSql).toContain('lock table sqms_catalog_items in share row exclusive mode')
+    expect(migrationSql).toContain("p_entity_type not in ('category', 'topic', 'item')")
+    expect(migrationSql).toContain('grant select on sqms_catalog_categories, sqms_catalog_topics, sqms_catalog_items to anon, authenticated')
+    expect(migrationSql).toContain('revoke all on function save_sqms_catalog_entry')
+    expect(migrationSql).not.toMatch(/\b(update|delete from)\s+change_requests\b/i)
   })
 
   it('blocks direct browser writes and records field overlap history', () => {

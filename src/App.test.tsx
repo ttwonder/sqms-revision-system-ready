@@ -185,6 +185,7 @@ describe('request manual save flow', () => {
     fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
     fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
     expect(screen.queryByText('需求刪除管理')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /資料與空間/ }))
     expect(screen.getByText('資料與空間管理')).toBeInTheDocument()
 
     for (const tabName of ['總清單', '待完成', '已完成']) {
@@ -233,6 +234,7 @@ describe('request manual save flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
 
     expect(screen.queryByText('需求刪除管理')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /資料與空間/ }))
     expect(screen.getByText('資料與空間管理')).toBeInTheDocument()
     expect(await screen.findByText('正常需求')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('checkbox', { name: '選擇永久刪除 SQMS-20260821-42' }))
@@ -242,6 +244,55 @@ describe('request manual save flow', () => {
     const saved = JSON.parse(localStorage.getItem('sqms-change-requests-v1') || '[]')
     expect(saved.map((request: ChangeRequest) => request.id)).toEqual(['keep-active'])
     expect(confirmSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows one management section at a time from the side navigation', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.change(screen.getByLabelText('密碼'), { target: { value: 'SQMS-ADMIN' } })
+    fireEvent.click(screen.getByRole('button', { name: '登入管理' }))
+
+    const navigation = screen.getByRole('navigation', { name: '管理頁分區' })
+    expect(screen.getByRole('region', { name: '目錄與分類管理' })).toBeInTheDocument()
+    expect(screen.queryByText('需求來源項目管理')).not.toBeInTheDocument()
+
+    fireEvent.click(within(navigation).getByRole('button', { name: /需求來源/ }))
+    expect(screen.getByText('需求來源項目管理')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '目錄與分類管理' })).not.toBeInTheDocument()
+
+    fireEvent.click(within(navigation).getByRole('button', { name: /人員與權限/ }))
+    expect(screen.getByText('人員與權限管控')).toBeInTheDocument()
+    expect(screen.queryByText('需求來源項目管理')).not.toBeInTheDocument()
+
+    fireEvent.click(within(navigation).getByRole('button', { name: /資料與空間/ }))
+    expect(screen.getByText('資料與空間管理')).toBeInTheDocument()
+    expect(screen.queryByText('人員與權限管控')).not.toBeInTheDocument()
+  })
+
+  it('keeps old request codes visible and editable after catalog relationships move', async () => {
+    localStorage.setItem('sqms-shared-catalog-v1', JSON.stringify([
+      { id: 'cat-a', code: 'A', nameZh: '大類甲', sortOrder: 1, active: true, topics: [{ id: 'topic-old', code: 'OLD', titleZh: '舊主題', sortOrder: 1, active: true, items: [] }] },
+      { id: 'cat-b', code: 'B', nameZh: '大類乙', sortOrder: 2, active: true, topics: [{ id: 'topic-new', code: 'T1', titleZh: '移動後主題', sortOrder: 1, active: true, items: [{ id: 'item-1', code: 'I1', titleZh: '移動後項目', sortOrder: 1, active: true }] }] },
+    ]))
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ id: 'moved-topic', requestNo: 'SQMS-20260821-61', categoryCode: 'A', topicCode: 'T1', manualItemCode: 'I1' }),
+      requestFixture({ id: 'moved-item', requestNo: 'SQMS-20260821-62', categoryCode: 'A', topicCode: 'OLD', manualItemCode: 'I1' }),
+    ]))
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
+    const table = await screen.findByRole('table')
+    await waitFor(() => expect(within(table).getAllByText('I1 移動後項目')).toHaveLength(2))
+    const rows = within(table).getAllByRole('row')
+    const movedTopicRow = rows.find((row) => row.textContent?.includes('SQMS-20260821-61')) as HTMLElement
+    const movedItemRow = rows.find((row) => row.textContent?.includes('SQMS-20260821-62')) as HTMLElement
+    expect(movedTopicRow).toHaveTextContent('T1｜I｜移動後主題')
+    expect(movedItemRow).toHaveTextContent('OLD｜舊主題')
+
+    fireEvent.click(within(movedItemRow).getByRole('button', { name: '修改' }))
+    expect(screen.getByLabelText('第一層主題')).toHaveValue('OLD')
+    expect(screen.getByLabelText('第二層手冊 / 文件項')).toHaveValue('I1')
+    expect(within(screen.getByLabelText('第二層手冊 / 文件項')).getByRole('option', { name: 'I1｜移動後項目' })).toBeInTheDocument()
   })
 
   it('opens batch entry and saves two independent requests', async () => {

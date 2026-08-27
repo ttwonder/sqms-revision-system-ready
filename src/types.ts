@@ -1,26 +1,32 @@
-export type CategoryCode = 'SMM' | 'SMP' | 'SMI' | 'SQMS' | 'ISO'
+export type CategoryCode = string
 
 export interface ManualItem {
+  id?: string
   code: string
   titleZh: string
   titleEn?: string
   sortOrder: number
+  active?: boolean
 }
 
 export interface Topic {
+  id?: string
   code: string
   titleZh: string
   titleEn?: string
   items: ManualItem[]
   sortOrder: number
+  active?: boolean
 }
 
 export interface CatalogCategory {
+  id?: string
   code: CategoryCode
   nameZh: string
   nameEn?: string
   topics: Topic[]
   sortOrder: number
+  active?: boolean
 }
 
 export type Urgency = 'urgent' | 'high' | 'medium' | 'low'

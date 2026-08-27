@@ -1,4 +1,4 @@
-import type { ChangeRequest } from '../types'
+import type { CatalogCategory, ChangeRequest } from '../types'
 import { catalog, getManualItem, getTopicDisplayLabel } from '../data/sqmsCatalog'
 
 export const statusLabels = {
@@ -15,27 +15,27 @@ export const urgencyLabels = {
   low: '低',
 } as const
 
-export function getCategoryName(code: string) {
-  return catalog.find((item) => item.code === code)?.nameZh ?? code
+export function getCategoryName(code: string, source: CatalogCategory[] = catalog) {
+  return source.find((item) => item.code === code)?.nameZh ?? code
 }
 
-export function getTopicLabel(code?: string) {
-  return getTopicDisplayLabel(code)
+export function getTopicLabel(code?: string, source: CatalogCategory[] = catalog) {
+  return getTopicDisplayLabel(code, source)
 }
 
-export function getItemLabel(topicCode?: string, itemCode?: string) {
-  const item = getManualItem(topicCode, itemCode)
+export function getItemLabel(topicCode?: string, itemCode?: string, source: CatalogCategory[] = catalog) {
+  const item = getManualItem(topicCode, itemCode, source)
   return item ? `${item.code} ${item.titleZh}` : itemCode || ''
 }
 
-export function rowsForExport(requests: ChangeRequest[]) {
+export function rowsForExport(requests: ChangeRequest[], source: CatalogCategory[] = catalog) {
   return requests.map((request) => ({
     需求編號: request.requestNo,
     需求來源: request.requestSource || '外部檢查',
     申請人: request.applicantName,
-    大類: getCategoryName(request.categoryCode),
-    第一層主題: getTopicLabel(request.topicCode),
-    第二層手冊或文件項: getItemLabel(request.topicCode, request.manualItemCode),
+    大類: getCategoryName(request.categoryCode, source),
+    第一層主題: getTopicLabel(request.topicCode, source),
+    第二層手冊或文件項: getItemLabel(request.topicCode, request.manualItemCode, source),
     修改內容歸屬補充: request.scopeNote ?? '',
     建議內容或方向: request.suggestedChange,
     修改理由或依據: request.changeReason,
@@ -66,15 +66,15 @@ function csvEscape(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 
-export function exportCsv(requests: ChangeRequest[], filename: string) {
-  const rows = rowsForExport(requests)
+export function exportCsv(requests: ChangeRequest[], filename: string, source: CatalogCategory[] = catalog) {
+  const rows = rowsForExport(requests, source)
   const headers = Object.keys(rows[0] ?? { 需求編號: '' })
   const csv = [headers.join(','), ...rows.map((row) => headers.map((header) => csvEscape(row[header as keyof typeof row])).join(','))].join('\n')
   downloadText(`\ufeff${csv}`, filename, 'text/csv;charset=utf-8;')
 }
 
-export function exportExcel(requests: ChangeRequest[], filename: string) {
-  const rows = rowsForExport(requests)
+export function exportExcel(requests: ChangeRequest[], filename: string, source: CatalogCategory[] = catalog) {
+  const rows = rowsForExport(requests, source)
   const headers = Object.keys(rows[0] ?? { 需求編號: '' })
   const htmlRows = [
     `<tr>${headers.map((header) => `<th>${header}</th>`).join('')}</tr>`,

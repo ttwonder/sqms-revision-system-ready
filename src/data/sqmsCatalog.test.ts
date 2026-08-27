@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { catalog, getTopicOptions, getManualItemOptions, getTopicAbbreviation, getTopicDisplayLabel } from './sqmsCatalog'
+import type { CatalogCategory } from '../types'
+import { catalog, getManualItem, getTopicOptions, getManualItemOptions, getTopicAbbreviation, getTopicDisplayLabel } from './sqmsCatalog'
 
 describe('SQMS 目錄層級', () => {
   it('第一層主題是 SMM/SMP/SMI 的第幾個主題，第二層是該主題下的手冊/文件項', () => {
@@ -14,6 +15,8 @@ describe('SQMS 目錄層級', () => {
     const smi01Items = getManualItemOptions('SMI-01')
     expect(smi01Items.length).toBeGreaterThan(5)
     expect(smi01Items.some((item) => item.code.includes('SHM-001') || item.titleZh.includes('有害物質'))).toBe(true)
+    expect(getManualItemOptions('SMI-05').some((item) => item.code === 'SWO-')).toBe(false)
+    expect(getManualItemOptions('SMI-05', catalog, true).filter((item) => item.code === 'SWO-').length).toBeGreaterThan(1)
   })
 
   it('adds a stable document abbreviation to every first-level topic label', () => {
@@ -30,5 +33,19 @@ describe('SQMS 目錄層級', () => {
         expect(getTopicDisplayLabel(topic.code)).toBe(`${topic.code}｜${abbreviation}｜${topic.titleZh}`)
       }
     }
+  })
+
+  it('keeps a uniquely coded moved item resolvable for old requests without guessing duplicate codes', () => {
+    const movedCatalog: CatalogCategory[] = [{
+      code: 'A', nameZh: '大類', sortOrder: 1, topics: [
+        { code: 'OLD', titleZh: '舊主題', sortOrder: 1, items: [] },
+        { code: 'NEW', titleZh: '新主題', sortOrder: 2, items: [{ code: 'I1', titleZh: '移動後名稱', sortOrder: 1 }] },
+        { code: 'D1', titleZh: '重複一', sortOrder: 3, items: [{ code: 'DUP', titleZh: '名稱一', sortOrder: 1 }] },
+        { code: 'D2', titleZh: '重複二', sortOrder: 4, items: [{ code: 'DUP', titleZh: '名稱二', sortOrder: 1 }] },
+      ],
+    }]
+
+    expect(getManualItem('OLD', 'I1', movedCatalog)?.titleZh).toBe('移動後名稱')
+    expect(getManualItem('OLD', 'DUP', movedCatalog)).toBeUndefined()
   })
 })

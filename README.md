@@ -14,7 +14,7 @@ GitHub Pages + Supabase 的靜態前端系統。
 - 統計清單、待完成清單
 - PDF 列印、CSV / Excel 匯出
 - 管理員登入後軟刪除
-- SQMS 目錄已依 Word 文件抽取：SMM / SMP / SMI / SQMS / ISO
+- SQMS 目錄已依 Word 文件抽取：SMM / SMP / SMI / SQMS / ISO；Owner／雲端管理員可在管理頁新增、改名、排序、移動、停用及恢復三層目錄
 
 ## 本機啟動
 
@@ -48,16 +48,21 @@ npm run dev
 8. 若修改既有需求時顯示 `column reference "changed_fields" is ambiguous`，執行：`supabase/migrations/202608250001_fix_patch_changed_fields_ambiguity.sql`。
    - 這個 hotfix 只替換修改需求 RPC 與還原其執行權限，不會新增、修改或刪除既有需求資料。
    - Migration 可重複執行；新安裝使用已修正的 collaboration migration，不會帶入此命名衝突。
-9. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
+9. 執行：`supabase/migrations/202608270001_catalog_management.sql`。
+   - 新增雲端共用的大類、第一層主題及第二層項目，以及 Owner／雲端管理員專用的安全寫入 RPC。
+   - 會將目前內建的 5 個大類、46 個第一層主題及 559 個第二層項目原樣初始化；不更新或刪除 `change_requests`。
+   - 代碼建立後不可修改；刪除操作採停用，可恢復。目錄資料表尚未安裝時，新版前端仍使用內建目錄，但管理頁為唯讀。
+   - 目前 4 組舊有重複第二層代碼會完整保留並標示，但不再出現在新需求選項；請新增唯一代碼的替代項後停用舊項目。
+10. Supabase → Authentication → Providers → Anonymous Sign-Ins，啟用匿名登入。
    - 這讓未登入人員也能取得可追蹤的 Auth session，以新增或修改需求；完成、刪除及狀態管理仍須管理員身份。
-10. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
+11. Supabase → Authentication → Users → Add user，建立第一個 owner 帳號。
    - 預設 owner email 已寫入 SQL：`tuotuoworm@outlook.com`。
    - 如需更換 owner，請先修改 `supabase/schema.sql` 中 `insert into admin_users` 的 email。
-11. 之後可在網站「管理」頁直接維護管理員名單。
+12. 之後可在網站「管理」頁直接維護管理員名單。
    - Owner 可以新增/停用管理員。
    - Admin 可以進入管理界面、完成及刪除需求，但不能維護管理員名單。
    - 不在 `admin_users` 名單中的 Auth 用戶即使有帳號密碼，也會提示無權限。
-12. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
+13. 若要在管理頁直接設定新管理員的初始密碼，Supabase Authentication 需允許 signup；若你關閉公開註冊，請先到 Supabase Auth → Users → Add user 建立帳號，再回網站管理頁加入管理員名單。
 
 > 部署順序必須是：先套用 migration 並啟用 Anonymous Sign-Ins，再部署新版前端。新版前端不會退回匿名直接寫表或整筆 `upsert`。
 
@@ -118,3 +123,7 @@ https://sqms.company.com/
 - CSV / Excel 可匯出
 - 管理員登入成功
 - 管理員可軟刪除，一般使用者看不到刪除按鈕
+- 管理後台左側四個分區切換時，右側只顯示所選功能
+- Owner／雲端管理員可新增、改名、排序、移動、停用及恢復三層目錄；人員管理員只能查看
+- 目錄改名後，舊需求的清單、搜尋及匯出使用新名稱，但原需求代碼不變
+- 停用項目不再出現在新增／批量新增選項，舊需求仍可顯示及修改
