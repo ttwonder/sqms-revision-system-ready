@@ -75,4 +75,15 @@ describe('request table layout', () => {
     expect(declaration('.request-table .actions button', 'white-space')).toBe('normal')
     expect(declaration('.request-table .actions button', 'overflow-wrap')).toBe('anywhere')
   })
+
+  it('keeps the top scrollbar track aligned with both table width variants', () => {
+    expect(declaration('.table-scrollbar-top', 'overflow-x')).toBe('auto')
+    expect(declaration('.table-scrollbar-spacer', 'min-width')).toBe('1160px')
+    expect(declaration('.table-scrollbar-spacer.with-selection', 'min-width')).toBe('1204px')
+    expect(declaration('.request-table tbody tr[hidden]', 'display')).toBe('table-row !important')
+  })
+
+  it('allows the two mobile filter columns to shrink inside the viewport', () => {
+    expect(declaration('.filters .search-input, .filters .range-select', 'min-width')).toBe('0')
+  })
 })

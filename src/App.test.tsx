@@ -390,6 +390,63 @@ describe('request manual save flow', () => {
     ])
   })
 
+  it('paginates shared lists at 40 rows with controls above and below the table', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify(Array.from({ length: 81 }, (_, index) => {
+      const sequence = index + 1
+      return requestFixture({
+        id: `page-${sequence}`,
+        requestNo: `SQMS-20260829-${String(sequence).padStart(2, '0')}`,
+        createdAt: '2026-08-29T00:00:00.000Z',
+      })
+    })))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
+
+    const table = await screen.findByRole('table')
+    const visibleRowTexts = () => within(table).getAllByRole('row').slice(1).map((row) => row.textContent)
+    expect(within(table).getAllByRole('row')).toHaveLength(41)
+    expect(visibleRowTexts().some((text) => text?.includes('SQMS-20260829-81'))).toBe(true)
+    expect(visibleRowTexts().some((text) => text?.includes('SQMS-20260829-41'))).toBe(false)
+    expect(screen.getAllByText('第 1 / 3 頁')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: '上一頁' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: '下一頁' })).toHaveLength(2)
+    expect(screen.getAllByLabelText('跳轉指定頁碼')).toHaveLength(2)
+
+    fireEvent.click(screen.getAllByRole('button', { name: '下一頁' })[1])
+    expect(screen.getAllByText('第 2 / 3 頁')).toHaveLength(2)
+    expect(within(table).getAllByRole('row')).toHaveLength(41)
+    expect(visibleRowTexts()).toEqual(expect.arrayContaining([expect.stringContaining('SQMS-20260829-41')]))
+    expect(visibleRowTexts().some((text) => text?.includes('SQMS-20260829-81'))).toBe(false)
+
+    const topJump = screen.getAllByLabelText('跳轉指定頁碼')[0]
+    fireEvent.change(topJump, { target: { value: '3' } })
+    fireEvent.click(screen.getAllByRole('button', { name: '跳轉' })[0])
+    expect(within(table).getAllByRole('row')).toHaveLength(2)
+    expect(within(table).getByText('SQMS-20260829-01')).toBeInTheDocument()
+    expect(screen.getAllByText('第 3 / 3 頁')).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole('button', { name: '待完成' }))
+    expect(screen.getAllByText('第 1 / 3 頁')).toHaveLength(2)
+  })
+
+  it('synchronizes the horizontal scroll positions above and below the table', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ requestNo: 'SQMS-20260829-01' }),
+    ]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
+    await screen.findByRole('table')
+
+    const topScrollbar = screen.getByLabelText('清單頂部水平滾動條')
+    const bottomScrollbar = screen.getByLabelText('清單底部水平滾動區')
+    topScrollbar.scrollLeft = 180
+    fireEvent.scroll(topScrollbar)
+    expect(bottomScrollbar.scrollLeft).toBe(180)
+    bottomScrollbar.scrollLeft = 320
+    fireEvent.scroll(bottomScrollbar)
+    expect(topScrollbar.scrollLeft).toBe(320)
+  })
+
   it('defaults all, pending, and completed lists to newest request number first', async () => {
     localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
       requestFixture({ requestNo: 'SQMS-20260820-01', createdAt: '2026-08-20T00:00:00.000Z', status: 'new' }),

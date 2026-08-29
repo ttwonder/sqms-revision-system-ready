@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -277,6 +277,7 @@ type RequestSort = { key: RequestSortKey, direction: SortDirection }
 
 const statusSortRank: Record<RequestStatus, number> = { new: 0, processing: 1, completed: 2, cancelled: 3 }
 const urgencySortRank: Record<Urgency, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+const REQUESTS_PER_PAGE = 40
 const compareText = (left: string, right: string) => left.localeCompare(right, 'zh-Hant', { numeric: true, sensitivity: 'base' })
 
 function compareRequests(left: ChangeRequest, right: ChangeRequest, sort: RequestSort) {
@@ -1267,7 +1268,7 @@ function App() {
         <section className="panel">
           <PrintHeader title={activeListTitle} filters={filters} count={listForActiveTab.length} searchQuery={searchQuery} catalogData={catalogData} />
           <ListHeader title={activeListTitle} filters={filters} setFilters={setFilters} requests={listForActiveTab} onRefresh={refresh} searchQuery={searchQuery} setSearchQuery={setSearchQuery} requestSourceOptions={requestSourceOptions} catalogData={catalogData} canManageRequests={canManagePage} selectedCount={selectedRequestsForActiveList.length} completableSelectedCount={completableSelectedRequests.length} bulkActionBusy={bulkActionBusy} onBulkComplete={openBulkCompletion} onBulkDelete={deleteSelectedRequests} />
-          <RequestTable requests={listForActiveTab} catalogData={catalogData} isAdmin={canManagePage} selectionEnabled={canManagePage} selectedRequestIds={selectedRequestIds} onToggleSelection={toggleRequestSelection} onToggleAll={toggleAllActiveRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
+          <RequestTable key={tab} requests={listForActiveTab} catalogData={catalogData} isAdmin={canManagePage} selectionEnabled={canManagePage} selectedRequestIds={selectedRequestIds} onToggleSelection={toggleRequestSelection} onToggleAll={toggleAllActiveRequests} onEdit={startEdit} onDelete={handleDelete} onComplete={setCompletingRequest} onReopen={reopenRequest} onStatusChange={changeRequestStatus} />
         </section>
       )}
 
@@ -1559,13 +1560,58 @@ function ListHeader({ title, filters, setFilters, requests, onRefresh, hideExpor
 
 function RequestTable({ requests, catalogData, isAdmin, selectionEnabled = false, selectedRequestIds = [], onToggleSelection, onToggleAll, onEdit, onDelete, onComplete, onReopen, onStatusChange }: { requests: ChangeRequest[], catalogData: CatalogCategory[], isAdmin: boolean, selectionEnabled?: boolean, selectedRequestIds?: string[], onToggleSelection?: (requestId: string) => void, onToggleAll?: () => void, onEdit: (r: ChangeRequest) => void, onDelete: (r: ChangeRequest) => void, onComplete: (r: ChangeRequest) => void, onReopen: (r: ChangeRequest) => void, onStatusChange: (r: ChangeRequest, status: RequestStatus) => void }) {
   const [sort, setSort] = useState<RequestSort>({ key: 'requestNo', direction: 'desc' })
+  const [page, setPage] = useState(1)
+  const [jumpPage, setJumpPage] = useState('1')
+  const topScrollbarRef = useRef<HTMLDivElement>(null)
+  const bottomScrollbarRef = useRef<HTMLDivElement>(null)
+  const requestsPageKey = requests.map((request) => request.id).join('|')
+  const previousRequestsPageKeyRef = useRef(requestsPageKey)
   const sorted = [...requests].sort((a, b) => compareRequests(a, b, sort))
+  const totalPages = Math.max(1, Math.ceil(sorted.length / REQUESTS_PER_PAGE))
+  const currentPage = Math.min(page, totalPages)
+  const pageStartIndex = (currentPage - 1) * REQUESTS_PER_PAGE
+  const pageEndIndex = Math.min(pageStartIndex + REQUESTS_PER_PAGE, sorted.length)
+  const pageStart = sorted.length ? pageStartIndex + 1 : 0
+  const pageEnd = sorted.length ? pageEndIndex : 0
   const allSelected = requests.length > 0 && requests.every((request) => selectedRequestIds.includes(request.id))
   const someSelected = requests.some((request) => selectedRequestIds.includes(request.id))
+
+  useLayoutEffect(() => {
+    if (previousRequestsPageKeyRef.current === requestsPageKey) return
+    previousRequestsPageKeyRef.current = requestsPageKey
+    setPage(1)
+    setJumpPage('1')
+  }, [requestsPageKey])
+
+  useEffect(() => {
+    if (page <= totalPages) return
+    setPage(totalPages)
+    setJumpPage(String(totalPages))
+  }, [page, totalPages])
+
+  const goToPage = (requestedPage: number) => {
+    const nextPage = Math.min(totalPages, Math.max(1, Math.trunc(requestedPage)))
+    setPage(nextPage)
+    setJumpPage(String(nextPage))
+  }
+  const submitJump = (event: React.FormEvent) => {
+    event.preventDefault()
+    const requestedPage = Number(jumpPage)
+    if (!Number.isFinite(requestedPage)) {
+      setJumpPage(String(currentPage))
+      return
+    }
+    goToPage(requestedPage)
+  }
   const changeSort = (key: RequestSortKey) => {
+    setPage(1)
+    setJumpPage('1')
     setSort((current) => current?.key === key
       ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
       : { key, direction: 'asc' })
+  }
+  const syncHorizontalScroll = (source: HTMLDivElement, target: HTMLDivElement | null) => {
+    if (target && target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft
   }
   const sortHeader = (key: RequestSortKey, label: string) => {
     const active = sort?.key === key
@@ -1573,10 +1619,37 @@ function RequestTable({ requests, catalogData, isAdmin, selectionEnabled = false
     const icon = !active ? <ArrowUpDown size={14} /> : sort.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />
     return <th aria-sort={ariaSort}><button type="button" className={`sort-header ${active ? 'active' : ''}`} onClick={() => changeSort(key)} aria-label={label} title={`按${label}排序；再次點擊切換方向`}>{label}{icon}</button></th>
   }
-  return <div className="table-wrap"><table className={`request-table ${selectionEnabled ? 'with-selection' : ''}`}><colgroup>{selectionEnabled && <col className="col-select no-print" />}<col className="col-content" /><col className="col-scope" /><col className="col-no" /><col className="col-due" /><col className="col-source" /><col className="col-urgency" /><col className="col-applicant" /><col className="col-status" /><col className="col-actions" /></colgroup><thead><tr>{selectionEnabled && <th className="select-cell no-print"><input className="table-select" type="checkbox" aria-label="全選目前清單" checked={allSelected} ref={(node) => { if (node) node.indeterminate = someSelected && !allSelected }} onChange={onToggleAll} /></th>}<th>建議內容</th>{sortHeader('scope', '歸屬')}{sortHeader('requestNo', '編號')}{sortHeader('targetDueDate', '期望日')}{sortHeader('requestSource', '來源')}{sortHeader('urgency', '急迫度')}{sortHeader('applicantName', '申請人')}{sortHeader('status', '狀態')}<th className="no-print">操作</th></tr></thead><tbody>{sorted.length === 0 ? <tr><td colSpan={selectionEnabled ? 10 : 9} className="empty">暫無資料</td></tr> : sorted.map((request) => {
-    const completed = request.status === 'completed'
-    const selected = selectedRequestIds.includes(request.id)
-    return <tr key={request.id} className={`${isOverdue(request) ? 'overdue' : ''}${selected ? ' selected' : ''}`}>{selectionEnabled && <td className="select-cell no-print"><input className="table-select" type="checkbox" aria-label={`選取 ${request.requestNo}`} checked={selected} onChange={() => onToggleSelection?.(request.id)} /></td>}<td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td><span className="tag">{getCategoryName(request.categoryCode, catalogData)}</span><b>{getTopicLabel(request.topicCode, catalogData)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode, catalogData) || '未選第二層'}</small></td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td>{request.targetDueDate || '—'}</td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className={`urgency ${request.urgency}`}>{urgencyLabels[request.urgency]}</span></td><td>{request.applicantName}</td><td>{isAdmin ? <select className={`status-select ${request.status}`} aria-label={`${request.requestNo} 狀態`} value={request.status} onChange={(e) => onStatusChange(request, e.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}<button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button></>}</td></tr>
-  })}</tbody></table></div>
+  const pagination = (position: '上方' | '下方') => <nav className={`table-pagination ${position === '上方' ? 'top' : 'bottom'} no-print`} aria-label={`清單分頁（${position}）`}>
+    <span className="pagination-summary">共 {sorted.length} 筆｜本頁 {pageStart}–{pageEnd} 筆</span>
+    <div className="pagination-controls">
+      <button type="button" className="ghost" disabled={currentPage === 1} onClick={() => goToPage(currentPage - 1)}>上一頁</button>
+      <b>第 {currentPage} / {totalPages} 頁</b>
+      <button type="button" className="ghost" disabled={currentPage === totalPages} onClick={() => goToPage(currentPage + 1)}>下一頁</button>
+      <form className="page-jump" onSubmit={submitJump}>
+        <label>跳至第<input type="number" min="1" max={totalPages} step="1" value={jumpPage} onChange={(event) => setJumpPage(event.target.value)} aria-label="跳轉指定頁碼" />頁</label>
+        <button type="submit" className="ghost">跳轉</button>
+      </form>
+    </div>
+  </nav>
+
+  return <div className="request-table-shell">
+    {pagination('上方')}
+    <div className="table-scrollbar-top no-print" ref={topScrollbarRef} aria-label="清單頂部水平滾動條" tabIndex={0} onScroll={(event) => syncHorizontalScroll(event.currentTarget, bottomScrollbarRef.current)}>
+      <div className={`table-scrollbar-spacer ${selectionEnabled ? 'with-selection' : ''}`} />
+    </div>
+    <div className="table-wrap" ref={bottomScrollbarRef} aria-label="清單底部水平滾動區" tabIndex={0} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollbarRef.current)}>
+      <table className={`request-table ${selectionEnabled ? 'with-selection' : ''}`}>
+        <colgroup>{selectionEnabled && <col className="col-select no-print" />}<col className="col-content" /><col className="col-scope" /><col className="col-no" /><col className="col-due" /><col className="col-source" /><col className="col-urgency" /><col className="col-applicant" /><col className="col-status" /><col className="col-actions" /></colgroup>
+        <thead><tr>{selectionEnabled && <th className="select-cell no-print"><input className="table-select" type="checkbox" aria-label="全選目前清單" checked={allSelected} ref={(node) => { if (node) node.indeterminate = someSelected && !allSelected }} onChange={onToggleAll} /></th>}<th>建議內容</th>{sortHeader('scope', '歸屬')}{sortHeader('requestNo', '編號')}{sortHeader('targetDueDate', '期望日')}{sortHeader('requestSource', '來源')}{sortHeader('urgency', '急迫度')}{sortHeader('applicantName', '申請人')}{sortHeader('status', '狀態')}<th className="no-print">操作</th></tr></thead>
+        <tbody>{sorted.length === 0 ? <tr><td colSpan={selectionEnabled ? 10 : 9} className="empty">暫無資料</td></tr> : sorted.map((request, index) => {
+          const completed = request.status === 'completed'
+          const selected = selectedRequestIds.includes(request.id)
+          const outsideCurrentPage = index < pageStartIndex || index >= pageEndIndex
+          return <tr key={request.id} hidden={outsideCurrentPage} className={`${isOverdue(request) ? 'overdue' : ''}${selected ? ' selected' : ''}`}>{selectionEnabled && <td className="select-cell no-print"><input className="table-select" type="checkbox" aria-label={`選取 ${request.requestNo}`} checked={selected} onChange={() => onToggleSelection?.(request.id)} /></td>}<td><b>{request.suggestedChange}</b><small>{request.changeReason}</small>{request.remarks ? <small className="request-remarks">備註：{request.remarks}</small> : null}</td><td><span className="tag">{getCategoryName(request.categoryCode, catalogData)}</span><b>{getTopicLabel(request.topicCode, catalogData)}</b><small>{getItemLabel(request.topicCode, request.manualItemCode, catalogData) || '未選第二層'}</small></td><td><b>{request.requestNo}</b><small>{request.createdAt.slice(0, 10)}</small></td><td>{request.targetDueDate || '—'}</td><td><span className="source-chip">{request.requestSource || '外部檢查'}</span></td><td><span className={`urgency ${request.urgency}`}>{urgencyLabels[request.urgency]}</span></td><td>{request.applicantName}</td><td>{isAdmin ? <select className={`status-select ${request.status}`} aria-label={`${request.requestNo} 狀態`} value={request.status} onChange={(event) => onStatusChange(request, event.target.value as RequestStatus)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <span className={`status ${request.status}`}>{statusLabels[request.status]}</span>}{request.completionDate ? <small>完成：{request.completionDate}</small> : null}</td><td className="actions no-print"><button onClick={() => onEdit(request)}>修改</button>{isAdmin && <>{completed ? <button onClick={() => onReopen(request)}>再次修改</button> : request.status !== 'cancelled' ? <button className="primary mini" onClick={() => onComplete(request)}>完成</button> : null}<button className="danger" onClick={() => onDelete(request)}><Trash2 size={14} />刪除</button></>}</td></tr>
+        })}</tbody>
+      </table>
+    </div>
+    {pagination('下方')}
+  </div>
 }
 export default App
