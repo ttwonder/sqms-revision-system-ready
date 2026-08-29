@@ -358,6 +358,38 @@ describe('request manual save flow', () => {
     }
   })
 
+  it('orders shared list columns as requested while keeping each field width class attached', async () => {
+    localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
+      requestFixture({ requestNo: 'SQMS-20260821-01' }),
+    ]))
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: '總清單' }))
+
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('columnheader').map((header) => header.textContent?.trim())).toEqual([
+      '建議內容',
+      '歸屬',
+      '編號',
+      '期望日',
+      '來源',
+      '急迫度',
+      '申請人',
+      '狀態',
+      '操作',
+    ])
+    expect([...table.querySelectorAll('col')].map((column) => column.className)).toEqual([
+      'col-content',
+      'col-scope',
+      'col-no',
+      'col-due',
+      'col-source',
+      'col-urgency',
+      'col-applicant',
+      'col-status',
+      'col-actions',
+    ])
+  })
+
   it('defaults all, pending, and completed lists to newest request number first', async () => {
     localStorage.setItem('sqms-change-requests-v1', JSON.stringify([
       requestFixture({ requestNo: 'SQMS-20260820-01', createdAt: '2026-08-20T00:00:00.000Z', status: 'new' }),
