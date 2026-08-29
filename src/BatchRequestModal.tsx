@@ -10,6 +10,7 @@ type EntryState = 'pending' | 'saving' | 'saved' | 'error'
 type BatchEntry = {
   key: string
   request: ChangeRequest
+  dirty: boolean
   missing: RequiredField[]
   state: EntryState
   error?: string
@@ -25,8 +26,8 @@ type BatchRequestModalProps = {
   onComplete: (savedRequests: ChangeRequest[]) => void
 }
 
-function createEntry(request: ChangeRequest): BatchEntry {
-  return { key: crypto.randomUUID(), request, missing: [], state: 'pending' }
+function createEntry(request: ChangeRequest, dirty = false): BatchEntry {
+  return { key: crypto.randomUUID(), request, dirty, missing: [], state: 'pending' }
 }
 
 function missingRequiredFields(request: ChangeRequest): RequiredField[] {
@@ -50,6 +51,7 @@ export default function BatchRequestModal({ catalogData, requestSourceOptions, c
       return {
         ...entry,
         request: nextRequest,
+        dirty: true,
         missing: entry.missing.filter((missingField) => missingField !== field || !String(value ?? '').trim()),
         state: entry.state === 'error' ? 'pending' : entry.state,
         error: undefined,
@@ -63,6 +65,7 @@ export default function BatchRequestModal({ catalogData, requestSourceOptions, c
     setEntries((current) => current.map((entry) => entry.key === key && entry.state !== 'saved' ? {
       ...entry,
       request: { ...entry.request, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: firstItem?.code ?? '' },
+      dirty: true,
       state: entry.state === 'error' ? 'pending' : entry.state,
       error: undefined,
     } : entry))
@@ -73,17 +76,24 @@ export default function BatchRequestModal({ catalogData, requestSourceOptions, c
     setEntries((current) => current.map((entry) => entry.key === key && entry.state !== 'saved' ? {
       ...entry,
       request: { ...entry.request, topicCode, manualItemCode: firstItem?.code ?? '' },
+      dirty: true,
       state: entry.state === 'error' ? 'pending' : entry.state,
       error: undefined,
     } : entry))
   }
 
   function addEntry() {
-    setEntries((current) => [...current, createEntry(createRequest())])
+    setEntries((current) => [...current, createEntry(createRequest(), true)])
   }
 
   function removeEntry(key: string) {
     setEntries((current) => current.length > 1 ? current.filter((entry) => entry.key !== key) : current)
+  }
+
+  function cancelBatch() {
+    const hasUnsavedDraft = entries.some((entry) => entry.state !== 'saved' && entry.dirty)
+    if (hasUnsavedDraft && !window.confirm('仍有未保存草稿，是否退出？')) return
+    onCancel()
   }
 
   async function submitBatch(event: React.FormEvent) {
@@ -145,7 +155,7 @@ export default function BatchRequestModal({ catalogData, requestSourceOptions, c
           <h2>批量增加需求</h2>
           <p className="subtle">先輸入一筆；按「添加需求」即可增加到 N 筆。已成功的項目不會在重試時重複送出。</p>
         </div>
-        <button className="ghost" type="button" onClick={onCancel} disabled={saving}>關閉</button>
+        <button className="ghost" type="button" onClick={cancelBatch} disabled={saving}>關閉</button>
       </header>
 
       <form onSubmit={submitBatch} className="batch-form">

@@ -51,16 +51,18 @@ describe('request manual save flow', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows an explicit manual-save button and confirms an acknowledged save', async () => {
+  it('shows matching manual-save buttons above and below the form and saves from the upper button', async () => {
     render(<App />)
 
-    expect(await screen.findByRole('button', { name: '手動保存新增需求' })).toBeEnabled()
+    const saveButtons = await screen.findAllByRole('button', { name: '手動保存新增需求' })
+    expect(saveButtons).toHaveLength(2)
+    expect(saveButtons.every((button) => !button.hasAttribute('disabled'))).toBe(true)
     expect(screen.getByText('草稿會自動保留在此裝置；只有按下手動保存才會正式送出。')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('申請人 *'), { target: { value: '測試人員' } })
     fireEvent.change(screen.getByLabelText('需改的建議內容或方向 *'), { target: { value: '測試手動保存' } })
     fireEvent.change(screen.getByLabelText('需要修改的理由或依據 *'), { target: { value: '確認保存提示' } })
-    fireEvent.click(screen.getByRole('button', { name: '手動保存新增需求' }))
+    fireEvent.click(saveButtons[0])
 
     const success = await screen.findByRole('status')
     expect(success).toHaveTextContent(/^保存成功：已新增 SQMS-/)
@@ -71,6 +73,49 @@ describe('request manual save flow', () => {
       expect(saved).toHaveLength(1)
       expect(saved[0]).toMatchObject({ applicantName: '測試人員', suggestedChange: '測試手動保存' })
     })
+  })
+
+  it('renames the reset action and only confirms when it would clear a modified draft', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App />)
+
+    const clearButton = await screen.findByRole('button', { name: '清空已有草稿' })
+    fireEvent.click(clearButton)
+    expect(confirmSpy).not.toHaveBeenCalled()
+
+    const suggestion = screen.getByLabelText('需改的建議內容或方向 *')
+    fireEvent.change(suggestion, { target: { value: '尚未保存的單筆草稿' } })
+    fireEvent.click(clearButton)
+
+    expect(confirmSpy).toHaveBeenCalledWith('以下操作會清空草稿，是否繼續？')
+    expect(suggestion).toHaveValue('尚未保存的單筆草稿')
+
+    confirmSpy.mockReturnValueOnce(true)
+    fireEvent.click(clearButton)
+    await waitFor(() => expect(suggestion).toHaveValue(''))
+  })
+
+  it('warns before closing batch entry only when an unsaved batch draft exists', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '批量增加' }))
+    let dialog = screen.getByRole('dialog', { name: '批量增加需求' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉' }))
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: '批量增加需求' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '批量增加' }))
+    dialog = screen.getByRole('dialog', { name: '批量增加需求' })
+    fireEvent.change(within(dialog).getByLabelText('需改的建議內容或方向 *'), { target: { value: '尚未保存的批量草稿' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉' }))
+
+    expect(confirmSpy).toHaveBeenCalledWith('仍有未保存草稿，是否退出？')
+    expect(screen.getByRole('dialog', { name: '批量增加需求' })).toBeInTheDocument()
+
+    confirmSpy.mockReturnValueOnce(true)
+    fireEvent.click(within(dialog).getByRole('button', { name: '關閉' }))
+    expect(screen.queryByRole('dialog', { name: '批量增加需求' })).not.toBeInTheDocument()
   })
 
   it('uses the signed-in person as an editable applicant default', async () => {
@@ -158,7 +203,7 @@ describe('request manual save flow', () => {
     expect(await screen.findByText('修改既有需求')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('備註'), { target: { value: '訪客直接修改' } })
-    fireEvent.click(screen.getByRole('button', { name: '手動保存修改' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '手動保存修改' })[0])
     expect(await screen.findByRole('status')).toHaveTextContent(/保存成功：已更新 SQMS-20260821-11/)
     expect(JSON.parse(localStorage.getItem('sqms-change-requests-v1') || '[]')[0].remarks).toBe('訪客直接修改')
   })

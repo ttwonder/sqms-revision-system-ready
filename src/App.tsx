@@ -377,6 +377,7 @@ function App() {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [batchRequestOpen, setBatchRequestOpen] = useState(false)
   const [draftRestored, setDraftRestored] = useState(false)
+  const [formDirty, setFormDirty] = useState(false)
   const [requestSaving, setRequestSaving] = useState(false)
   const [requestSaveState, setRequestSaveState] = useState<RequestSaveState>(initialRequestSaveState)
 
@@ -493,6 +494,7 @@ function App() {
       setEditingId(draft.editingId)
       setEditingBaseRequest(draft.editingBaseRequest)
       setEditingStartedRevision(draft.editingStartedRevision)
+      setFormDirty(true)
       setMessage('已恢復上次尚未送出的草稿。')
       setRequestSaveState({ tone: 'hint', text: '已恢復尚未手動保存的草稿；確認內容後請按手動保存。' })
     }
@@ -643,6 +645,7 @@ function App() {
 
   function updateForm<K extends keyof ChangeRequest>(key: K, value: ChangeRequest[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+    setFormDirty(true)
     setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
     if (missingFields.includes(key as RequiredField) && String(value ?? '').trim()) {
       setMissingFields((current) => current.filter((field) => field !== key))
@@ -650,12 +653,14 @@ function App() {
   }
 
   async function resetForm() {
+    if (formDirty && !window.confirm('以下操作會清空草稿，是否繼續？')) return
     clearRequestDraft(localStorage)
     setEditingId(null)
     setEditingBaseRequest(null)
     setEditingStartedRevision(null)
     setMissingFields([])
     setForm(await blankRequestWithCloudNo())
+    setFormDirty(false)
     setMessage('已切換到新增模式。')
     setRequestSaveState(initialRequestSaveState)
     setTab('form')
@@ -785,6 +790,7 @@ function App() {
       setEditingStartedRevision(null)
       clearRequestDraft(localStorage)
       setForm(await blankRequestWithCloudNo())
+      setFormDirty(false)
     } catch (error) {
       const errorText = `手動保存失敗：${error instanceof Error ? error.message : '未知錯誤'}。草稿仍保留在畫面與此裝置中。`
       setMessage(errorText)
@@ -800,6 +806,7 @@ function App() {
     setEditingStartedRevision(request.revision)
     setMissingFields([])
     setForm({ ...request })
+    setFormDirty(false)
     setTab('form')
     setMessage(`正在修改 ${request.requestNo}`)
     setRequestSaveState({ tone: 'hint', text: `正在修改 ${request.requestNo}；修改後請按手動保存。` })
@@ -1219,12 +1226,13 @@ function App() {
               <h2>{editingId ? '修改既有需求' : '快速新增修改需求'}</h2>
             </div>
             <div className="section-title-actions no-print">
+              <button className="primary" type="submit" form="request-form" disabled={requestSaving}><Save size={16} />{requestSaving ? '保存中…' : editingId ? '手動保存修改' : '手動保存新增需求'}</button>
               <button className="primary" type="button" onClick={() => setBatchRequestOpen(true)}><PlusCircle size={16} />批量增加</button>
-              <button className="ghost" type="button" onClick={resetForm}>新增一筆</button>
+              <button className="ghost" type="button" onClick={resetForm}>清空已有草稿</button>
             </div>
           </div>
           <p className="duplicate-search-hint no-print">{duplicateSearchHint}</p>
-          <form onSubmit={handleSubmit} className="request-form">
+          <form id="request-form" onSubmit={handleSubmit} className="request-form">
             <label>需求編號<input value={form.requestNo} readOnly title="正式編號由伺服器在新增時自動分配" /></label>
             <label>需求來源 *<select className={fieldError('requestSource')} value={form.requestSource} onChange={(e) => updateForm('requestSource', e.target.value)}>{requestSourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}</select></label>
             <label>申請人 *<input className={fieldError('applicantName')} value={form.applicantName} onChange={(e) => updateForm('applicantName', e.target.value)} placeholder="輸入姓名" /></label>
@@ -1233,12 +1241,14 @@ function App() {
               const firstTopic = getTopicOptions(categoryCode, catalogData)[0]
               const firstItem = getManualItemOptions(firstTopic?.code, catalogData)[0]
               setForm((current) => ({ ...current, categoryCode, topicCode: firstTopic?.code ?? '', manualItemCode: firstItem?.code ?? '' }))
+              setFormDirty(true)
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
             }}>{categoryOptions.map((category) => <option key={category.code} value={category.code}>{category.code}｜{category.nameZh}{category.active === false ? '（已停用）' : ''}</option>)}</select></label>
             <label>第一層主題<select value={form.topicCode} onChange={(e) => {
               const topicCode = e.target.value
               const firstItem = getManualItemOptions(topicCode, catalogData)[0]
               setForm((current) => ({ ...current, topicCode, manualItemCode: firstItem?.code ?? '' }))
+              setFormDirty(true)
               setRequestSaveState({ tone: 'hint', text: '有尚未手動保存的內容；草稿已自動保留在此裝置。' })
             }}>{topicOptions.map((topic) => <option key={topic.code} value={topic.code}>{getTopicDisplayLabel(topic.code, catalogData)}{topic.active === false ? '（已停用）' : ''}</option>)}</select></label>
             <label>第二層手冊 / 文件項<select value={form.manualItemCode ?? ''} onChange={(e) => updateForm('manualItemCode', e.target.value)}><option value="">只具體到第一層主題</option>{itemOptions.map((item, index) => <option key={`${form.topicCode}-${item.id || item.code}-${index}`} value={item.code}>{item.code}｜{item.titleZh}{item.active === false ? '（已停用）' : ''}</option>)}</select></label>
